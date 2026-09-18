@@ -1,13 +1,12 @@
 import { Module } from '@nestjs/common';
-import { Config } from './config/config';
-import { Database } from './database/database';
+import { DatabaseModule } from './database/database.module';
+import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health/health.controller';
-import { AuthController } from './auth/auth.controller';
-import { Sessions, SessionGuard } from './auth/session';
 import { Problems, ProblemsController } from './problems/problems';
-import { Executions, ExecutionsController } from './executions/executions';
+import { ExecutionsModule } from './executions/executions.module';
 @Module({
-  controllers: [HealthController, AuthController, ProblemsController, ExecutionsController],
-  providers: [Config, Database, Sessions, SessionGuard, Problems, Executions],
+  imports: [DatabaseModule, AuthModule, ExecutionsModule],
+  controllers: [HealthController, ProblemsController],
+  providers: [Problems],
 })
 export class AppModule {}

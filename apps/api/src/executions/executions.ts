@@ -1,5 +1,5 @@
 import { Controller, Get, Headers, HttpCode, Inject, Injectable, Param, Post, Query, Req, Body, UseGuards } from '@nestjs/common';
-import { activeStates, CreateExecution, createExecutionSchema, idempotencyKeySchema, submissionsQuerySchema, uuidSchema } from '@arenacore/contracts';
+import { activeStates, CreateExecution, createExecutionSchema, ExecutionReceipt, idempotencyKeySchema, MAX_SOURCE_BYTES, submissionsQuerySchema, uuidSchema } from '@arenacore/contracts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { Database } from '../database/database';
@@ -7,6 +7,7 @@ import { Config } from '../config/config';
 import { ApiError, validate } from '../common/errors';
 import { AuthenticatedRequest, SessionGuard } from '../auth/session';
 import { publicSnapshot } from './serialization';
+import { ExecutionAdmission } from './admission';
 
 export function payloadHash(input: CreateExecution): string {
   // Explicit field order; transport JSON order never changes the hash.
@@ -14,8 +15,8 @@ export function payloadHash(input: CreateExecution): string {
 }
 @Injectable()
 export class Executions {
-  constructor(@Inject(Database) private readonly db: Database, @Inject(Config) private readonly config: Config) {}
-  async create(userId: string, input: CreateExecution, key: string) {
+  constructor(@Inject(Database) private readonly db: Database, @Inject(Config) private readonly config: Config, @Inject(ExecutionAdmission) private readonly admission: ExecutionAdmission) {}
+  async create(userId: string, input: CreateExecution, key: string, ip: string): Promise<ExecutionReceipt> {
     if (!this.config.executionsEnabled) throw new ApiError(503, 'EXECUTIONS_DISABLED', 'Code execution is not available yet.');
     const hash = payloadHash(input);
     // Lock the owner row: concurrent creates for the same user are serialized.
@@ -30,17 +31,22 @@ export class Executions {
       if (count >= this.config.values.MAX_ACTIVE_JOBS_PER_USER) throw new ApiError(429, 'ACTIVE_JOB_LIMIT', 'Wait for your active execution to finish.', 5);
       const problem = await tx.problem.findUnique({where: {id: input.problemId}, select: {currentVersion: {select: {id: true, published: true}}}});
       if (!problem?.currentVersion?.published) throw new ApiError(404, 'NOT_FOUND', 'Problem not found.');
-      const row = await tx.execution.create({data: {userId, problemVersionId: problem.currentVersion.id, language: input.language, mode: input.mode, sourceCode: input.sourceCode, payloadHash: hash, idempotencyKey: key}});
+      await this.admission.reserve(tx, userId, ip);
+      const row = await tx.execution.create({data: {userId, problemVersionId: problem.currentVersion.id, language: input.language, mode: input.mode, sourceCode: input.sourceCode, payloadHash: hash, idempotencyKey: key, queueExpiresAt: new Date(Date.now() + this.config.values.QUEUE_TTL_SECONDS * 1000)}});
       await tx.outboxEvent.create({data: {kind: 'EXECUTION_CREATED', executionId: row.id}});
       return {executionId: row.id, state: row.state};
     });
   }
   async snapshot(userId: string, id: string) {
-    const row = await this.db.execution.findFirst({where: {id, userId}, include: {problemVersion: {select: {problemId: true}}}});
+    const row = await this.db.execution.findFirst({where: {id, userId}, select: {
+      id: true, problemVersion: {select: {problemId: true}}, language: true, mode: true,
+      state: true, attempt: true, lastSequence: true, verdict: true, runtimeMs: true,
+      memoryKiB: true, publicResults: true, failureCode: true,
+    }});
     if (!row) throw new ApiError(404, 'NOT_FOUND', 'Execution not found.');
     return publicSnapshot(row);
   }
-  async cancel(userId: string, id: string) {
+  async cancel(userId: string, id: string): Promise<ExecutionReceipt> {
     // Queue-stage cancellation only. Running jobs require the supervisor kill protocol.
     return this.db.$transaction(async tx => {
       const changed = await tx.execution.updateMany({where: {id, userId, state: 'QUEUED'}, data: {state: 'CANCELLED', verdict: 'CANCELLED', finishedAt: new Date()}});
@@ -58,8 +64,8 @@ export class Executions {
       userId, mode: 'SUBMIT',
       ...(cursor ? {OR: [{createdAt: {lt: cursor.createdAt}}, {createdAt: cursor.createdAt, id: {lt: cursor.id}}]} : {}),
       ...(query.problemId ? {problemVersion: {problemId: query.problemId}} : {}),
-    }, select: {id: true, language: true, state: true, verdict: true, createdAt: true, runtimeMs: true, memoryKiB: true, problemVersion: {select: {problemId: true, title: true}}}, orderBy: [{createdAt: 'desc'}, {id: 'desc'}], take: 21});
-    const items = rows.slice(0,20).map(row => ({executionId: row.id, problemId: row.problemVersion.problemId, problemTitle: row.problemVersion.title, language: row.language, state: row.state, createdAt: row.createdAt.toISOString(), ...(row.verdict !== null ? {verdict: row.verdict} : {}), ...(row.runtimeMs !== null ? {runtimeMs: row.runtimeMs} : {}), ...(row.memoryKiB !== null ? {memoryKiB: row.memoryKiB} : {})}));
+    }, select: {id: true, language: true, state: true, verdict: true, createdAt: true, runtimeMs: true, memoryKiB: true, failureCode: true, problemVersion: {select: {problemId: true, title: true}}}, orderBy: [{createdAt: 'desc'}, {id: 'desc'}], take: 21});
+    const items = rows.slice(0,20).map(row => ({executionId: row.id, problemId: row.problemVersion.problemId, problemTitle: row.problemVersion.title, language: row.language, state: row.state, createdAt: row.createdAt.toISOString(), ...(row.verdict !== null ? {verdict: row.verdict} : {}), ...(row.runtimeMs !== null ? {runtimeMs: row.runtimeMs} : {}), ...(row.memoryKiB !== null ? {memoryKiB: row.memoryKiB} : {}), ...(row.failureCode !== null ? {failureCode: row.failureCode} : {})}));
     return {items, nextCursor: rows.length > 20 ? items.at(-1)!.executionId : null};
   }
 }
@@ -70,8 +76,8 @@ export class ExecutionsController {
   @Post('executions') @HttpCode(202)
   create(@Req() req: AuthenticatedRequest, @Body() body: unknown, @Headers('idempotency-key') key: unknown) {
     // Differentiate byte cap from invalid shape without leaking user source.
-    if (body && typeof body === 'object' && 'sourceCode' in body && typeof body.sourceCode === 'string' && Buffer.byteLength(body.sourceCode, 'utf8') > 64 * 1024) throw new ApiError(413, 'SOURCE_TOO_LARGE', 'Source exceeds 64 KiB.');
-    return this.executions.create(req.principal.userId, validate(createExecutionSchema, body), validate(idempotencyKeySchema, key));
+    if (body && typeof body === 'object' && 'sourceCode' in body && typeof body.sourceCode === 'string' && Buffer.byteLength(body.sourceCode, 'utf8') > MAX_SOURCE_BYTES) throw new ApiError(413, 'SOURCE_TOO_LARGE', 'Source exceeds 64 KiB.');
+    return this.executions.create(req.principal.userId, validate(createExecutionSchema, body), validate(idempotencyKeySchema, key), req.ip ?? req.socket.remoteAddress ?? 'unknown');
   }
   @Get('executions/:id') snapshot(@Req() req: AuthenticatedRequest, @Param('id') id: string) { return this.executions.snapshot(req.principal.userId, validate(uuidSchema, id)); }
   @Post('executions/:id/cancel') @HttpCode(200)

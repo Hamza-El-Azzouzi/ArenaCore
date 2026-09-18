@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import type { ProblemDetail, SubmissionSummary } from '@arenacore/contracts';
 async function json<T>(response: Response): Promise<T> { return await response.json() as T; }
@@ -30,8 +31,10 @@ integration('real PostgreSQL API integration', () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = url;
     process.env.NODE_ENV = 'test';
+    process.env.OIDC_ENABLED = 'false';
     process.env.PUBLIC_ORIGIN = origin;
     process.env.EXECUTIONS_ENABLED = 'true';
+    process.env.EXECUTION_RATE_LIMIT_KEY = randomBytes(32).toString('base64');
     db = new PrismaClient({datasources: {db: {url}}});
     await seed(db);
     await seed(db); // Published fixtures remain immutable; seed is repeatable.
@@ -39,7 +42,7 @@ integration('real PostgreSQL API integration', () => {
     ownerId = users[0]!.id;
     otherId = users[1]!.id;
     const sessions = [newSessionSecrets(), newSessionSecrets()];
-    for (let i=0; i<2; i++) await db.session.create({data: {userId: users[i]!.id, tokenHash: sessions[i]!.tokenHash, csrfTokenHash: sessions[i]!.csrfTokenHash, expiresAt: new Date(Date.now()+60000)}});
+    for (let i=0; i<2; i++) await db.session.create({data: {userId: users[i]!.id, tokenHash: sessions[i]!.tokenHash, csrfTokenHash: sessions[i]!.csrfTokenHash, expiresAt: new Date(Date.now()+600000)}});
     cookie = `arenacore_session=${sessions[0]!.token}`;
     otherCookie = `arenacore_session=${sessions[1]!.token}`;
     csrf = sessions[0]!.csrfToken;
@@ -53,6 +56,7 @@ integration('real PostgreSQL API integration', () => {
       const jobs = await db.execution.findMany({where: {userId: {in: [ownerId, otherId]}}, select: {id: true}});
       await db.outboxEvent.deleteMany({where: {executionId: {in: jobs.map(j=>j.id)}}});
       await db.execution.deleteMany({where: {userId: {in: [ownerId, otherId]}}});
+      await db.auditEvent.deleteMany({where: {actorId: {in: [ownerId, otherId]}}});
       await db.user.deleteMany({where: {id: {in: [ownerId, otherId]}}});
     }
     await db?.$disconnect();

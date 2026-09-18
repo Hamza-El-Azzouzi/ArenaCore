@@ -1,6 +1,6 @@
 # ArenaCore: architecture and deployment plan
 
-Status: target architecture; the foundation and persistence/API baseline are now implemented. See README for verified progress. The full system is not implemented or security-certified.
+Status: target architecture; the foundation, persistence/API baseline, OIDC identity and durable-job API/database milestones are now implemented and automatically verified. See README for verified progress. The full system is not implemented or security-certified.
 Reviewed: 18 September 2026.
 
 ## Requirements and scope
@@ -83,7 +83,7 @@ Verdicts: ACCEPTED, WRONG_ANSWER, COMPILATION_ERROR, RUNTIME_ERROR, TIME_LIMIT_E
 6. On reconnect, retrieve REST snapshot and replay public events after the last sequence. Deduplicate by executionId/attempt/sequence. If replay expired, show an output-unavailable notice and restore the snapshot.
 7. Cancellation is idempotent and kills the full sandbox process tree. A normal disconnect does not cancel. A janitor removes orphan sandboxes after crashes. Bound queue wait and total job time; expired jobs get a terminal state.
 
-States: QUEUED -> COMPILING -> RUNNING -> FINISHED; active states can transition to CANCELLED or INTERNAL_ERROR. Queue-expired jobs terminate with INTERNAL_ERROR and a safe explanatory code. A completed job cannot be cancelled retroactively.
+States: QUEUED -> COMPILING -> RUNNING -> FINISHED; active states can transition to CANCELLED or INTERNAL_ERROR. Queue-expired jobs terminate with INTERNAL_ERROR and the safe QUEUE_TIMEOUT code. Stage 4 implements persisted queue deadlines and bounded scheduled reconciliation; worker claim/lease handling remains pending. A completed job cannot be cancelled retroactively.
 
 ## Security baseline and launch gates
 
@@ -103,7 +103,7 @@ API/browser controls:
 - Secure HttpOnly SameSite sessions; rotate session after sign-in; explicit expiry/revocation; no auth tokens in localStorage. OIDC issuer/audience/state/nonce/PKCE validation is server-owned.
 - Same-origin production routing for web, /api/v1 and /socket.io. Validate browser Origin, authenticate socket handshake, enforce expiry and per-message authorization; CSRF tokens on mutating cookie-authenticated REST requests. Restrict CORS to exact configured origins for separate development hosts.
 - Strict input schemas and byte limits; language enum only; server owns image, paths, limits, test suite and command. Reject unknown fields and client-supplied owner IDs.
-- Per-user and per-IP request quotas, job concurrency caps and global queue/runner capacity. Start at one active job per user and a modest configurable creation rate; tune from measurements. Return actionable 429/503 responses.
+- Per-user and per-IP request quotas, job concurrency caps and global queue/runner capacity. Implemented API admission starts at one active job per user, a configurable global unfinished-job cap, and shared user/IP/global successful-creation quotas. Tune from measurements; edge request limits and physical runner capacity remain separate production work. Return actionable 429/503 responses.
 - Render console as text; strip dangerous control sequences, cap browser buffers. Sanitize Markdown and disable arbitrary HTML. CSP must accommodate Monaco workers without broad unsafe script allowances.
 - Owner checks for every execution/history route and socket room. Admin problem management requires separate RBAC and audit trails; problem authors cannot inject backend commands.
 - TLS/WSS, managed secrets, least-privilege database roles, encrypted backups, log redaction, retention policy and deletion procedure. Private submission source never becomes public implicitly.
@@ -126,7 +126,7 @@ Base: /api/v1; cookie credentials included; mutations include X-CSRF-Token. API 
 - GET /me -> {user: {id, displayName, avatarUrl?} | null, csrfToken?}
 - GET /problems?difficulty=&search=&cursor= -> {items: ProblemSummary[], nextCursor: string | null}
 - GET /problems/:slug -> ProblemDetail (public statement, constraints, examples, limits, templates; never private tests).
-- POST /executions + Idempotency-Key -> {executionId, state: 'QUEUED'}; body {problemId, language: 'java'|'python'|'javascript', mode: 'RUN'|'SUBMIT', sourceCode}.
+- POST /executions + Idempotency-Key -> {executionId, state} (new jobs QUEUED; matching retries return current durable state); body {problemId, language: 'java'|'python'|'javascript', mode: 'RUN'|'SUBMIT', sourceCode}.
 - GET /executions/:id -> owner-authorized ExecutionSnapshot.
 - POST /executions/:id/cancel -> {executionId, state}; safe on repeat.
 - GET /submissions?problemId=&cursor= -> owner history, SUBMIT mode only, with paginated summary rows.

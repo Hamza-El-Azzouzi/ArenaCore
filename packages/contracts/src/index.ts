@@ -6,6 +6,8 @@ export const languageSchema = z.enum(['java', 'python', 'javascript']);
 export const modeSchema = z.enum(['RUN', 'SUBMIT']);
 export const stateSchema = z.enum(['QUEUED', 'COMPILING', 'RUNNING', 'FINISHED', 'CANCELLED', 'INTERNAL_ERROR']);
 export const verdictSchema = z.enum(['ACCEPTED', 'WRONG_ANSWER', 'COMPILATION_ERROR', 'RUNTIME_ERROR', 'TIME_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED', 'OUTPUT_LIMIT_EXCEEDED', 'CANCELLED', 'INTERNAL_ERROR']);
+export const executionFailureCodeSchema = z.enum(['QUEUE_TIMEOUT', 'JOB_FAILURE']);
+export type ExecutionFailureCode = z.infer<typeof executionFailureCodeSchema>;
 export type Language = z.infer<typeof languageSchema>;
 export type ExecutionMode = z.infer<typeof modeSchema>;
 export type ExecutionState = z.infer<typeof stateSchema>;
@@ -45,11 +47,14 @@ export interface ExecutionSnapshot {
   executionId: string; problemId: string; language: Language; mode: ExecutionMode;
   state: ExecutionState; attempt: number; lastSequence: number; verdict?: Verdict;
   runtimeMs?: number; memoryKiB?: number; publicCaseResults?: PublicCaseResult[];
+  failureCode?: ExecutionFailureCode;
 }
 export interface SubmissionSummary {
   executionId: string; problemId: string; problemTitle: string; language: Language; state: ExecutionState;
   verdict?: Verdict; createdAt: string; runtimeMs?: number; memoryKiB?: number;
+  failureCode?: ExecutionFailureCode;
 }
+export interface ExecutionReceipt { executionId: string; state: ExecutionState }
 
 const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
   QUEUED: ['COMPILING', 'CANCELLED', 'INTERNAL_ERROR'],

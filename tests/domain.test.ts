@@ -45,7 +45,7 @@ describe('lifecycle and confidentiality', () => {
     expect(canTransition('RUNNING', 'FINISHED')).toBe(true);
   });
   it('removes all private results and source from Submit snapshots', () => {
-    const dto = publicSnapshot({id: 'job', problemVersion: {problemId: 'problem'}, language: 'python', mode: 'SUBMIT', state: 'FINISHED', attempt: 1, lastSequence: 2, verdict: 'WRONG_ANSWER', runtimeMs: null, memoryKiB: null, publicResults: [{input: 'HIDDEN_SECRET', stdout: 'HIDDEN_SECRET'}], sourceCode: 'PRIVATE_SOURCE'} as Parameters<typeof publicSnapshot>[0]);
+    const dto = publicSnapshot({id: 'job', problemVersion: {problemId: 'problem'}, language: 'python', mode: 'SUBMIT', state: 'FINISHED', attempt: 1, lastSequence: 2, verdict: 'WRONG_ANSWER', runtimeMs: null, memoryKiB: null, failureCode: null, publicResults: [{input: 'HIDDEN_SECRET', stdout: 'HIDDEN_SECRET'}], sourceCode: 'PRIVATE_SOURCE'} as Parameters<typeof publicSnapshot>[0]);
     expect(JSON.stringify(dto)).not.toContain('HIDDEN_SECRET');
     expect(dto).not.toHaveProperty('sourceCode');
     expect(dto).not.toHaveProperty('publicCaseResults');
@@ -53,6 +53,20 @@ describe('lifecycle and confidentiality', () => {
   });
 });
 describe('deployment config', () => {
+  it('requires a stable canonical quota key when job creation is enabled', () => {
+    const base = {DATABASE_URL: 'postgresql://localhost/db', EXECUTIONS_ENABLED: 'true'};
+    expect(() => parseConfig(base)).toThrow('EXECUTION_RATE_LIMIT_KEY');
+    expect(() => parseConfig({...base, EXECUTION_RATE_LIMIT_KEY: 'PRIVATE_BAD_KEY'})).toThrow('Invalid configuration: EXECUTION_RATE_LIMIT_KEY');
+    expect(parseConfig({...base, EXECUTION_RATE_LIMIT_KEY: Buffer.alloc(32, 1).toString('base64')}).QUEUE_TTL_SECONDS).toBe(120);
+  });
+  it('rejects unbounded capacity, invalid quota values, and unsafe queue deadlines', () => {
+    const base = {DATABASE_URL: 'postgresql://localhost/db'};
+    for (const [key, value] of [['MAX_ACTIVE_JOBS_GLOBAL', '0'], ['EXECUTION_CREATIONS_PER_MINUTE', '-1'],
+      ['EXECUTION_IP_CREATIONS_PER_MINUTE', '1.5'], ['EXECUTION_GLOBAL_CREATIONS_PER_MINUTE', '100001'],
+      ['QUEUE_TTL_SECONDS', '9'], ['QUEUE_TTL_SECONDS', '3601'], ['JOB_MAINTENANCE_INTERVAL_SECONDS', '0']]) {
+      expect(() => parseConfig({...base, [key!]: value})).toThrow();
+    }
+  });
   it('fails closed on missing database, insecure production origin and typo switches', () => {
     expect(() => parseConfig({})).toThrow();
     expect(() => parseConfig({DATABASE_URL: 'postgresql://localhost/db', NODE_ENV: 'production', PUBLIC_ORIGIN: 'http://app.example'})).toThrow();

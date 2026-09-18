@@ -46,6 +46,10 @@ enum Visibility {
   PUBLIC
   HIDDEN
 }
+enum ExecutionFailureCode {
+  QUEUE_TIMEOUT
+  JOB_FAILURE
+}
 model User {
   id           String      @id @default(uuid()) @db.Uuid
   issuer       String
@@ -67,6 +71,7 @@ model Session {
   revokedAt     DateTime?
   createdAt     DateTime  @default(now())
   @@index([expiresAt])
+  @@index([userId, revokedAt, expiresAt])
 }
 model Problem {
   id         String           @id @default(uuid()) @db.Uuid
@@ -134,18 +139,25 @@ model Execution {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   finishedAt       DateTime?
+  queueExpiresAt   DateTime       @default(dbgenerated("(CURRENT_TIMESTAMP + '00:02:00'::interval)"))
+  failureCode      ExecutionFailureCode?
+  outboxEvents     OutboxEvent[]
   @@unique([userId, idempotencyKey])
   @@index([userId, state])
   @@index([state, createdAt])
   @@index([userId, mode, id])
+  @@index([userId, mode, createdAt, id])
+  @@index([state, queueExpiresAt, id])
 }
 model OutboxEvent {
   id          String    @id @default(uuid()) @db.Uuid
   kind        String
   executionId String    @db.Uuid
+  execution   Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
   createdAt   DateTime  @default(now())
   publishedAt DateTime?
   @@index([publishedAt, createdAt])
+  @@unique([executionId, kind])
 }
 model AuditEvent {
   id        String   @id @default(uuid()) @db.Uuid
@@ -154,4 +166,26 @@ model AuditEvent {
   targetId  String?  @db.Uuid
   createdAt DateTime @default(now())
   @@index([createdAt])
+}
+
+model AuthAttempt {
+  stateHash          String   @id @db.Char(64)
+  browserTokenHash   String   @db.Char(64)
+  encryptedPayload   String
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  @@index([expiresAt])
+  @@index([browserTokenHash])
+}
+model AuthRateLimit {
+  key       String   @id @db.Char(64)
+  count     Int      @default(1)
+  expiresAt DateTime
+  @@index([expiresAt])
+}
+model ExecutionRateLimit {
+  key       String   @id @db.Char(64)
+  count     Int      @default(1)
+  expiresAt DateTime
+  @@index([expiresAt])
 }
