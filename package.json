@@ -1,0 +1,42 @@
+{
+  "name": "arenacore",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "npm run build -w @arenacore/contracts && npm run build -w @arenacore/judge && npm run build -w @arenacore/api",
+    "typecheck": "npm run build && tsc -p tsconfig.json",
+    "test": "npm run build && vitest run",
+    "dev:api": "npm run build -w @arenacore/contracts && node --env-file=.env node_modules/tsx/dist/cli.mjs watch apps/api/src/main.ts",
+    "start:api": "node --env-file=.env apps/api/dist/main.js",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "check": "npm run db:validate && npm run typecheck && vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.0",
+    "multer": "2.3.0"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.5",
+    "@types/node": "^22.18.0",
+    "jose": "^6.1.0",
+    "prisma": "6.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "multer": "2.3.0",
+    "effect": "^3.20.0",
+    "deepmerge-ts": "8.0.0"
+  }
+}

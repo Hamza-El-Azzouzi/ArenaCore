@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum Role {
+  USER
+  ADMIN
+}
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+enum Language {
+  java
+  python
+  javascript
+}
+enum ExecutionMode {
+  RUN
+  SUBMIT
+}
+enum ExecutionState {
+  QUEUED
+  COMPILING
+  RUNNING
+  FINISHED
+  CANCELLED
+  INTERNAL_ERROR
+}
+enum Verdict {
+  ACCEPTED
+  WRONG_ANSWER
+  COMPILATION_ERROR
+  RUNTIME_ERROR
+  TIME_LIMIT_EXCEEDED
+  MEMORY_LIMIT_EXCEEDED
+  OUTPUT_LIMIT_EXCEEDED
+  CANCELLED
+  INTERNAL_ERROR
+}
+enum Visibility {
+  PUBLIC
+  HIDDEN
+}
+model User {
+  id           String      @id @default(uuid()) @db.Uuid
+  issuer       String
+  subject      String
+  displayName  String
+  role         Role        @default(USER)
+  createdAt    DateTime    @default(now())
+  sessions     Session[]
+  executions   Execution[]
+  @@unique([issuer, subject])
+}
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  tokenHash     String    @unique @db.Char(64)
+  csrfTokenHash String    @db.Char(64)
+  userId        String    @db.Uuid
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  @@index([expiresAt])
+}
+model Problem {
+  id         String           @id @default(uuid()) @db.Uuid
+  slug       String           @unique
+  currentVersionId String? @unique @db.Uuid
+  currentVersion ProblemVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id])
+  versions   ProblemVersion[] @relation("ProblemVersions")
+  createdAt  DateTime         @default(now())
+}
+model ProblemVersion {
+  id                String         @id @default(uuid()) @db.Uuid
+  problemId         String         @db.Uuid
+  problem           Problem        @relation("ProblemVersions", fields: [problemId], references: [id])
+  currentFor        Problem?       @relation("CurrentVersion")
+  number            Int
+  published         Boolean        @default(false)
+  title             String
+  difficulty        Difficulty
+  tags              String[]
+  statementMarkdown String
+  constraints       String[]
+  timeMs            Int
+  memoryKiB         Int
+  templates         Json
+  comparator        String         @default("EXACT_NEWLINE")
+  testCases         TestCase[]
+  executions        Execution[]
+  createdAt         DateTime       @default(now())
+  @@unique([problemId, number])
+  @@index([published, problemId])
+}
+model TestCase {
+  id               String         @id @default(uuid()) @db.Uuid
+  problemVersionId String         @db.Uuid
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  ordinal          Int
+  visibility       Visibility
+  input            String
+  expectedOutput   String
+  @@unique([problemVersionId, ordinal])
+  @@index([problemVersionId, visibility])
+}
+model Execution {
+  id               String         @id @default(uuid()) @db.Uuid
+  userId           String         @db.Uuid
+  user             User           @relation(fields: [userId], references: [id])
+  problemVersionId String         @db.Uuid
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  language         Language
+  mode             ExecutionMode
+  sourceCode       String
+  payloadHash      String         @db.Char(64)
+  idempotencyKey   String
+  state            ExecutionState @default(QUEUED)
+  verdict          Verdict?
+  attempt          Int            @default(0)
+  lastSequence     Int            @default(0)
+  leaseToken       String?        @db.Uuid
+  leaseExpiresAt   DateTime?
+  runtimeImage     String?
+  runtimeMs        Int?
+  memoryKiB        Int?
+  // Public RUN results only. Hidden diagnostics must never enter this column.
+  publicResults    Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  finishedAt       DateTime?
+  @@unique([userId, idempotencyKey])
+  @@index([userId, state])
+  @@index([state, createdAt])
+  @@index([userId, mode, id])
+}
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  kind        String
+  executionId String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+  @@index([publishedAt, createdAt])
+}
+model AuditEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @db.Uuid
+  action    String
+  targetId  String?  @db.Uuid
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
