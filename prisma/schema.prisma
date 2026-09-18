@@ -49,6 +49,9 @@ enum Visibility {
 enum ExecutionFailureCode {
   QUEUE_TIMEOUT
   JOB_FAILURE
+  LEASE_EXPIRED
+  JOB_TIMEOUT
+  CANCELLATION_TIMEOUT
 }
 model User {
   id           String      @id @default(uuid()) @db.Uuid
@@ -141,13 +144,16 @@ model Execution {
   finishedAt       DateTime?
   queueExpiresAt   DateTime       @default(dbgenerated("(CURRENT_TIMESTAMP + '00:02:00'::interval)"))
   failureCode      ExecutionFailureCode?
+  cancellationRequestedAt DateTime?
   outboxEvents     OutboxEvent[]
+  publicEvents     ExecutionEvent[]
   @@unique([userId, idempotencyKey])
   @@index([userId, state])
   @@index([state, createdAt])
   @@index([userId, mode, id])
   @@index([userId, mode, createdAt, id])
   @@index([state, queueExpiresAt, id])
+  @@index([state, leaseExpiresAt])
 }
 model OutboxEvent {
   id          String    @id @default(uuid()) @db.Uuid
@@ -156,8 +162,13 @@ model OutboxEvent {
   execution   Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
   createdAt   DateTime  @default(now())
   publishedAt DateTime?
+  generation Int @default(0)
+  dispatchToken String? @db.Uuid
+  dispatchExpiresAt DateTime?
+  nextDispatchAt DateTime @default(now())
+  dispatchAttempts Int @default(0)
   @@index([publishedAt, createdAt])
-  @@unique([executionId, kind])
+  @@unique([executionId, kind, generation])
 }
 model AuditEvent {
   id        String   @id @default(uuid()) @db.Uuid
@@ -187,5 +198,20 @@ model ExecutionRateLimit {
   key       String   @id @db.Char(64)
   count     Int      @default(1)
   expiresAt DateTime
+  @@index([expiresAt])
+}
+
+model ExecutionEvent {
+  id String @id @default(uuid()) @db.Uuid
+  executionId String @db.Uuid
+  execution Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  attempt Int
+  sequence Int
+  kind String
+  payload Json
+  bytes Int
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  @@unique([executionId, attempt, sequence])
   @@index([expiresAt])
 }

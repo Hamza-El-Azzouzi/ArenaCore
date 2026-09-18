@@ -10,6 +10,10 @@ const envSchema = z.object({
   PUBLIC_ORIGIN: z.url().default('http://localhost:3000'),
   DATABASE_URL: z.string().url().refine(value => /^postgres(ql)?:\/\//.test(value), 'PostgreSQL URL required'),
   EXECUTIONS_ENABLED: z.enum(['true', 'false']).default('false'),
+  PIPELINE_ENABLED: z.enum(['true', 'false']).default('false'),
+  REALTIME_ENABLED: z.enum(['true', 'false']).default('false'),
+  REDIS_URL: optionalString(z.string().url().refine(v => /^rediss?:\/\//.test(v))),
+  QUEUE_NAME: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/).default('arenacore-executions'),
   OIDC_ENABLED: z.enum(['true', 'false']).default('false'),
   OIDC_ISSUER: optionalString(z.string().url()),
   OIDC_CLIENT_ID: optionalString(z.string().min(1).max(255)),
@@ -30,6 +34,7 @@ const envSchema = z.object({
   QUEUE_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(120),
   JOB_MAINTENANCE_INTERVAL_SECONDS: z.coerce.number().int().min(1).max(300).default(15),
 }).superRefine((env, ctx) => {
+  if (env.PIPELINE_ENABLED === 'true' && !env.REDIS_URL) ctx.addIssue({code: 'custom', path: ['REDIS_URL'], message: 'Required for queue dispatch'});
   if (env.EXECUTIONS_ENABLED === 'true' && !env.EXECUTION_RATE_LIMIT_KEY) {
     ctx.addIssue({code: 'custom', path: ['EXECUTION_RATE_LIMIT_KEY'], message: 'Required when execution creation is enabled'});
   }

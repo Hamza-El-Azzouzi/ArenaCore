@@ -6,7 +6,7 @@ export const languageSchema = z.enum(['java', 'python', 'javascript']);
 export const modeSchema = z.enum(['RUN', 'SUBMIT']);
 export const stateSchema = z.enum(['QUEUED', 'COMPILING', 'RUNNING', 'FINISHED', 'CANCELLED', 'INTERNAL_ERROR']);
 export const verdictSchema = z.enum(['ACCEPTED', 'WRONG_ANSWER', 'COMPILATION_ERROR', 'RUNTIME_ERROR', 'TIME_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED', 'OUTPUT_LIMIT_EXCEEDED', 'CANCELLED', 'INTERNAL_ERROR']);
-export const executionFailureCodeSchema = z.enum(['QUEUE_TIMEOUT', 'JOB_FAILURE']);
+export const executionFailureCodeSchema = z.enum(['QUEUE_TIMEOUT', 'JOB_FAILURE', 'LEASE_EXPIRED', 'JOB_TIMEOUT', 'CANCELLATION_TIMEOUT']);
 export type ExecutionFailureCode = z.infer<typeof executionFailureCodeSchema>;
 export type Language = z.infer<typeof languageSchema>;
 export type ExecutionMode = z.infer<typeof modeSchema>;
@@ -45,7 +45,7 @@ export interface PublicCaseResult {
 }
 export interface ExecutionSnapshot {
   executionId: string; problemId: string; language: Language; mode: ExecutionMode;
-  state: ExecutionState; attempt: number; lastSequence: number; verdict?: Verdict;
+  state: ExecutionState; attempt: number; lastSequence: number; verdict?: Verdict; cancellationRequested?: boolean;
   runtimeMs?: number; memoryKiB?: number; publicCaseResults?: PublicCaseResult[];
   failureCode?: ExecutionFailureCode;
 }
@@ -54,7 +54,7 @@ export interface SubmissionSummary {
   verdict?: Verdict; createdAt: string; runtimeMs?: number; memoryKiB?: number;
   failureCode?: ExecutionFailureCode;
 }
-export interface ExecutionReceipt { executionId: string; state: ExecutionState }
+export interface ExecutionReceipt { executionId: string; state: ExecutionState; cancellationRequested?: boolean }
 
 const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
   QUEUED: ['COMPILING', 'CANCELLED', 'INTERNAL_ERROR'],
@@ -65,3 +65,19 @@ const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
 export const activeStates = ['QUEUED', 'COMPILING', 'RUNNING'] as const;
 export function isTerminal(state: ExecutionState): boolean { return transitions[state].length === 0; }
 export function canTransition(from: ExecutionState, to: ExecutionState): boolean { return transitions[from].includes(to); }
+
+// Clients acknowledge a cursor in an attempt; sequence numbers reset on recovery.
+export const executionSubscriptionSchema = z.strictObject({executionId: uuidSchema, attempt: z.number().int().nonnegative(), afterSequence: z.number().int().nonnegative()});
+export interface PublicExecutionEvent {
+  executionId: string; attempt: number; sequence: number;
+  kind: 'execution_status' | 'console_output' | 'final_verdict';
+  state?: ExecutionState; verdict?: Verdict; failureCode?: ExecutionFailureCode;
+  cancellationRequested?: boolean; caseId?: string; stream?: 'stdout' | 'stderr'; text?: string;
+}
+
+const eventIdentity = {executionId: uuidSchema, attempt: z.number().int().nonnegative(), sequence: z.number().int().positive()};
+export const publicExecutionEventSchema = z.discriminatedUnion('kind', [
+  z.strictObject({...eventIdentity, kind: z.literal('execution_status'), state: stateSchema, cancellationRequested: z.boolean().optional()}),
+  z.strictObject({...eventIdentity, kind: z.literal('console_output'), caseId: uuidSchema, stream: z.enum(['stdout', 'stderr']), text: z.string().refine(v => new TextEncoder().encode(v).byteLength <= 4096)}),
+  z.strictObject({...eventIdentity, kind: z.literal('final_verdict'), state: stateSchema, verdict: verdictSchema, failureCode: executionFailureCodeSchema.optional()}),
+]);

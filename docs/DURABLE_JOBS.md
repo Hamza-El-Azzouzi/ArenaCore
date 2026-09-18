@@ -36,11 +36,11 @@ Keep it stable and identical across replicas. Rotation changes quota identities 
 
 ## Cancellation and queue expiry
 
-Owner-authorized queued cancellation commits CANCELLED, its verdict/finish time, and one EXECUTION_CANCELLED intent. Repetition returns the existing state. A terminal job is not retroactively cancelled. COMPILING/RUNNING cancellation returns CANCELLATION_UNAVAILABLE; no sandbox-stop claim is made before the supervisor protocol exists.
+Owner-authorized queued cancellation commits CANCELLED, its verdict/finish time, and one EXECUTION_CANCELLED intent. Repetition returns the existing state. A terminal job is not retroactively cancelled. With the pipeline disabled, COMPILING/RUNNING cancellation returns CANCELLATION_UNAVAILABLE. Stage 5 enables a durable active cancellation request; terminal cancellation waits for trusted backend cleanup acknowledgement. See [the pipeline protocol](STAGE_5_PIPELINE.md).
 
 Every API instance runs bounded maintenance. It selects up to 100 overdue QUEUED rows using FOR UPDATE SKIP LOCKED, atomically records INTERNAL_ERROR + QUEUE_TIMEOUT and EXECUTION_EXPIRED intents, and removes expired creation counters. Multiple instances can sweep safely. Each instance avoids overlapping its own ticks. Large backlogs and locked rows can delay reconciliation beyond the persisted eligibility deadline.
 
-A future worker must check the deadline while claiming, refuse terminal jobs, and fence its mutations. Expiry handles queue waiting; it does not bound a running job. Maintenance failures produce only the safe JOB_MAINTENANCE_FAILED log code and retry on a later tick. Its timer stops and pending work finishes before database disconnection during Nest shutdown.
+The stage 5 worker protocol checks the deadline while claiming, refuses terminal jobs, and fences its mutations. Expiry handles queue waiting; it does not bound a running job. Maintenance failures produce only the safe JOB_MAINTENANCE_FAILED log code and retry on a later tick. Its timer stops and pending work finishes before database disconnection during Nest shutdown.
 
 ## Public reads and errors
 
@@ -53,7 +53,7 @@ Snapshots select explicit fields and omit source, lease secrets, and worker inte
 | EXECUTION_RATE_LIMIT | 429 | Successful new-creation quota reached |
 | EXECUTION_CAPACITY | 503 | Global unfinished-job capacity reached |
 | EXECUTIONS_DISABLED | 503 | Creation/retry switch is off |
-| CANCELLATION_UNAVAILABLE | 503 | Job needs the pending active-runner cancellation protocol |
+| CANCELLATION_UNAVAILABLE | 503 | Active cancellation unavailable while pipeline is disabled |
 
 Capacity and quota errors include Retry-After. An expired job is read successfully with terminal state/verdict and `failureCode: 'QUEUE_TIMEOUT'`; expiry is not an HTTP authentication or ownership error.
 
