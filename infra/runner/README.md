@@ -14,7 +14,7 @@ Preflight checks Docker's Linux/cgroup-v2/resource/seccomp support and registere
 
 ## Build and lock runtime images
 
-The three Dockerfiles in `runtime-images` require `BASE_IMAGE` explicitly. Select current security-patched Python 3.14 slim, Node 24 Debian slim, and Temurin 21 JDK bases. Resolve them to verified immutable digests, scan them and record provenance. The final custom image must have user `10001:10001` and only approved, nonsecret environment variables. No packages are installed during submissions.
+The three Dockerfiles in `runtime-images` require `BASE_IMAGE` explicitly. Select current security-patched Python 3.14 Alpine 3.24, Node 24 Alpine 3.24, and Temurin 21 JDK bases. The Alpine Node build for ARM64 uses musl and must pass the full host acceptance suite; do not infer compatibility from a successful image build. Resolve every base to a verified immutable digest, scan it and record provenance. The Python and JavaScript Dockerfiles remove package installers because submissions only invoke the language interpreter. The final custom image must have user `10001:10001` and only approved, nonsecret environment variables. No packages are installed during submissions.
 
 A representative operator build command is:
 
@@ -23,9 +23,19 @@ docker build --build-arg BASE_IMAGE='python@sha256:<verified-base-digest>' \
   -f runtime-images/python.Dockerfile -t '<private-registry>/arenacore/python:<release>' .
 ```
 
-Repeat with Java/JavaScript Dockerfiles and their own base digests. Publish approved images to your private registry through your release process, inspect their resulting repository digests, and pre-pull them on the runner. Publishing is an operator action; no image has been published by this implementation.
+Repeat with Java/JavaScript Dockerfiles and their own base digests. Publish approved images to your private registry through your release process, inspect their resulting repository digests, and pre-pull them on the runner. The first Java candidate passed the vulnerability gate. The first Debian-based Python and JavaScript candidates failed it and are not approved manifest entries; rebuild those images from the hardened Alpine Dockerfiles.
 
-Copy `runtime-images/images.example.json` to a protected operator-owned manifest outside submission scratch storage. Replace all placeholders with final custom-image references such as `registry.example/arenacore/python@sha256:<64 lowercase hex characters>`. Tags/placeholders fail validation. The implementation has no invented default image digests. No real three-language image manifest has been verified yet.
+Scan the final local image, not only its base, and reject any HIGH or CRITICAL finding before publishing or adding its digest to the manifest:
+
+```sh
+trivy image --image-src docker --scanners vuln \
+  --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+  '<private-registry>/arenacore/python:<release>'
+```
+
+Do not use `--ignore-unfixed` to force a pass. A suppression needs a repository-owned ignore entry with the exact advisory, affected component, expiry date and written reachability analysis. Trivy can discover SBOM files embedded in an image; its third-party-SBOM warning means package attribution needs verification, not that the finding should be silently ignored.
+
+Copy `runtime-images/images.example.json` to a protected operator-owned manifest outside submission scratch storage. Replace all placeholders with final custom-image references such as `registry.example/arenacore/python@sha256:<64 lowercase hex characters>`. Tags/placeholders fail validation. The implementation has no invented default image digests. Do not create the production manifest until all three final images pass their vulnerability and runtime acceptance gates.
 
 ```sh
 RUNNER_IMAGE_MANIFEST=/etc/arenacore/runtime-images.json \
