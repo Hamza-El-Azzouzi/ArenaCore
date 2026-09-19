@@ -79,7 +79,7 @@ jobs:
   deploy-application:
     name: Deploy application server
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_APPLICATION == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     concurrency:

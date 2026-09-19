@@ -90,9 +90,9 @@ SSH key. Obtain the server ED25519 fingerprint from the VM console and compare i
 the host key before saving `APP_SSH_HOST_KEY`; do not trust an unverified `ssh-keyscan`
 result.
 
-After the host is bootstrapped and the first manual health check passes, create the
-repository variable `DEPLOY_APPLICATION=true`. Until then, application deployment is
-skipped while the verification job continues to run on every push.
+After the host is bootstrapped and the environment secrets exist, every successful push
+to `main` deploys the tested commit automatically. Pull requests, scheduled audits and
+manual verification runs never deploy.
 
 Create a second protected environment named `production-runner` with corresponding
 `RUNNER_SSH_HOST`, `RUNNER_SSH_PORT`, `RUNNER_SSH_USER`, `RUNNER_SSH_PRIVATE_KEY`, and
