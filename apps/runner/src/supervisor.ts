@@ -8,12 +8,17 @@ import { normalizeJavaArtifacts, packFiles } from './artifacts';
 export interface CaseObservation {caseId:string;stdout:string;stderr:string;exitCode?:number;failure?:'TIME_LIMIT_EXCEEDED'|'MEMORY_LIMIT_EXCEEDED'|'OUTPUT_LIMIT_EXCEEDED';wallMs:number}
 export interface ExecutionObservation {cancellationConfirmed?:true;compilation?:{ok:boolean;stdout:string;stderr:string};cases:CaseObservation[]}
 const infoSchema=z.object({OSType:z.literal('linux'),CgroupVersion:z.literal('2'),CgroupDriver:z.enum(['systemd','cgroupfs']),Runtimes:z.record(z.string(),z.unknown()),SecurityOptions:z.array(z.string()),MemoryLimit:z.literal(true),PidsLimit:z.literal(true),CPUCfsQuota:z.literal(true)});
+// Docker's `{{json .}}` output is not a stable API: Docker 29 omits the
+// CPUCfsQuota property even though the named template field is available.
+// Construct the bounded capability record explicitly so every required gate is
+// represented and validated.
+const dockerInfoFormat='{"OSType":{{json .OSType}},"CgroupVersion":{{json .CgroupVersion}},"CgroupDriver":{{json .CgroupDriver}},"Runtimes":{{json .Runtimes}},"SecurityOptions":{{json .SecurityOptions}},"MemoryLimit":{{json .MemoryLimit}},"PidsLimit":{{json .PidsLimit}},"CPUCfsQuota":{{json .CPUCfsQuota}}}';
 export class SandboxSupervisor {
   private manifest:RuntimeManifest;private ready=false;private readonly active=new Map<string,AbortController>();private shuttingDown=false;
   constructor(private readonly docker:DockerTransport,manifest:unknown){this.manifest=manifestSchema.parse(manifest);}
   async preflight() {
     this.ready=false;
-    const info=infoSchema.parse(JSON.parse((await this.docker.command(['info','--format','{{json .}}'])).stdout.toString()));
+    const info=infoSchema.parse(JSON.parse((await this.docker.command(['info','--format',dockerInfoFormat])).stdout.toString()));
     if(!('runsc' in info.Runtimes)||!info.SecurityOptions.some(v=>v.includes('seccomp')))throw new Error('ISOLATION_UNAVAILABLE');
     for(const image of Object.values(this.manifest)) {
       const result=await this.docker.command(['image','inspect',image,'--format','{{json .}}']);
