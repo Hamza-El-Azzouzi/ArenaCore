@@ -19,9 +19,18 @@ ExecStart=/usr/bin/node /opt/arenacore/current/apps/runner/dist/main.js
 Restart=no
 TimeoutStopSec=50
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateDevices=yes
+PrivateNetwork=yes
 ProtectSystem=strict
 ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
 PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
 ReadWritePaths=/run/arenacore
 
 [Install]

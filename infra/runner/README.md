@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI; its live acceptance gate is still pending. Do not enable public execution from this guide alone. The current development machine has Linux Docker/cgroup v2 but no registered `runsc` runtime. Nothing here automatically alters that machine's daemon, firewall or system services.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. Service installation, lifecycle drills and trusted-worker integration remain launch gates. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -58,7 +58,7 @@ node_modules/.bin/vitest run tests/runner-isolation.integration.test.ts
 
 Opting in makes missing images/runtime fail the suite; it never falls back to ordinary Docker. Standard CI skips these tests because its PostgreSQL/Redis services do not provide a dedicated gVisor runner.
 
-The current live suite covers all three languages, infinite loops, output flooding, internet/metadata blocking, root filesystem/socket access, fresh scratch between cases, memory/PID/scratch caps, credential absence, cancellation with children, and malformed compilation. It has not been run successfully on a gVisor host.
+The current live suite covers all three languages, infinite loops, output flooding, internet/metadata blocking, root filesystem/socket access, fresh scratch between cases, memory/PID/scratch caps, credential absence, cancellation with children, and malformed compilation. All 14 tests passed on the dedicated ARM64 gVisor host using the approved digest-only manifest.
 
 Complete the remaining acceptance drills before stage 6 is marked complete: measured memory/PID/CPU/file/scratch enforcement; fork bombs and child-process escape attempts; compiler abuse; cross-job/process visibility; no host/API/DB/Redis credentials; cancellation during creation/compile/run; worker/supervisor death; bounded external orphan cleanup; restart and drain behavior; verified runtime/image provenance; and independent security review. Add real tests for these properties, rather than checking command flags alone.
 
@@ -80,4 +80,12 @@ The server listens only on `RUNNER_SOCKET_PATH`, chmods the socket to 0660, and 
 
 `SupervisorClient` uses the private socket and validates bounded responses. Cancellation uses a separate strict request while retaining the execution channel for cleanup acknowledgement. Unexpected execution-channel disconnection also triggers server cleanup. If the client loses contact or receives an error, it raises cleanup uncertainty; it cannot assume a process stopped. The independent janitor remains necessary after supervisor death. Raw observations, including hidden stdout/stderr, stay on this private channel and must be consumed by the trusted judge, never forwarded wholesale through REST or Socket.IO.
 
-Service templates assume `/opt/arenacore`, `/usr/bin/node`, `/usr/bin/docker`, `/var/run/docker.sock`, and explicitly created `arenacore-supervisor`/`arenacore-runner` identities. Adjust paths on the dedicated VM. API services must never join the Docker group. Protect the manifest as operator-owned read-only configuration. A stale Unix socket after an unclean supervisor exit intentionally causes startup failure; the operator must verify no owner is alive before removing it. Docker access itself bypasses many OS restrictions, so these unit settings supplement dedicated-host isolation.
+Service templates assume `/opt/arenacore`, `/usr/bin/node`, `/usr/bin/docker`, `/usr/bin/runsc`, `/var/run/docker.sock`, and the `arenacore-supervisor`/`arenacore-runner` identities. API services must never join the Docker group. Protect the manifest as operator-owned read-only configuration. A stale Unix socket after an unclean supervisor exit intentionally causes startup failure; the operator must verify no owner is alive before removing it. Docker access itself bypasses many OS restrictions, so these unit settings supplement dedicated-host isolation.
+
+After the manifest and binaries are present, install the identities and systemd units from a reviewed checkout:
+
+```sh
+sudo bash infra/runner/bootstrap-host.sh
+```
+
+The bootstrap is idempotent and ends with `RUNNER_BOOTSTRAP_INSTALLED_NOT_STARTED`. It grants Docker-group access only to `arenacore-supervisor`; the trusted judging worker must use a separate identity with access to the runner Unix socket but no Docker group membership. The bootstrap deliberately does not start or enable either service. Inspect the installed units and run the deployment activation separately.

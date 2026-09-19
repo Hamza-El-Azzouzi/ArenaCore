@@ -103,6 +103,16 @@ Keep `DEPLOY_RUNNER` disabled until immutable runtime images exist and the dedic
 host isolation suite passes. When enabled, a runner release must pass preflight before
 the active symlink changes. The API service never receives Docker access.
 
+Before enabling that variable, run the idempotent bootstrap from a reviewed runner-host
+checkout. It creates only the supervisor identity/group, grants Docker access only to
+that supervisor, locks the manifest to
+`root:arenacore-runner` mode `0640`, installs and verifies the systemd units, and does
+not start them:
+
+```sh
+sudo bash infra/runner/bootstrap-host.sh
+```
+
 For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,
 so secure host-only SameSite cookies remain available to credentialed API and Socket.IO
