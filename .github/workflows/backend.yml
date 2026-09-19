@@ -43,7 +43,27 @@ jobs:
       - run: npm run db:seed
       - run: npm run db:seed
       - run: npm run check
-      - run: npm audit --audit-level=moderate
+      - name: Audit dependencies
+        shell: bash
+        run: |
+          set -u
+          for attempt in 1 2 3; do
+            output="$(npm audit --audit-level=moderate 2>&1)"
+            status=$?
+            printf '%s\n' "$output"
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if ! printf '%s\n' "$output" | grep -Eq '503 Service Unavailable|performing maintenance|audit endpoint returned an error'; then
+              exit "$status"
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "npm audit service unavailable; retrying transient failure ($attempt/3)."
+              sleep "$((attempt * 20))"
+            fi
+          done
+          echo "npm audit remained unavailable after three attempts." >&2
+          exit 1
 
   deploy-application:
     name: Deploy application server
