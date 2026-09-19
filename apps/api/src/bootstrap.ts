@@ -19,8 +19,9 @@ export function configureApp(app: NestExpressApplication) {
   if (proxyCidrs) app.set('trust proxy', proxyCidrs.split(',').map(cidr => cidr.trim()));
   app.disable('x-powered-by');
   app.setGlobalPrefix('api/v1');
+  const publicOrigin = config.values.PUBLIC_ORIGIN;
   app.enableCors({
-    origin: config.values.PUBLIC_ORIGIN,
+    origin: (origin, callback) => callback(null, origin === publicOrigin),
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Idempotency-Key', 'X-CSRF-Token'],
