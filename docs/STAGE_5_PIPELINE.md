@@ -28,7 +28,7 @@ Maintenance reoffers published queued intents older than 10 seconds. An existing
 
 `startExecutionWorker(jobStore, redisUrl, queueName, backend)` creates a BullMQ worker with concurrency two. The backend is an explicit trusted adapter; there is no default adapter that executes source on the API host. Stage 6 must supply the isolated runner and separate runtime credentials/host.
 
-The backend receives an immutable execution, an `AbortSignal`, `markRunning()`, and a console writer. **Its promise must resolve or reject only after every process belonging to that attempt has stopped.** This is a contract for the future supervisor, not proof that a sandbox exists today. Integration tests supply a fixture adapter which returns static results and never executes submitted code.
+The backend receives an immutable execution, an `AbortSignal`, `markRunning()`, and a console writer. **Normal promise settlement requires every process belonging to that attempt to have stopped.** Stage 6 introduces `SandboxCleanupError` for unconfirmed cleanup; the wrapper treats it as infrastructure failure, never successful cancellation. This is a contract for the future supervisor, not proof that a sandbox exists today. Integration tests supply a fixture adapter which returns static results and never executes submitted code.
 
 Claims use a 30-second PostgreSQL lease, UUID token, and increasing attempt. Heartbeats run every second. Every worker mutation checks the attempt, token, active state, database-clock lease expiry, and overall deadline under the same row lock as its update. Three abandoned attempts become `INTERNAL_ERROR/LEASE_EXPIRED`. The overall deadline is the immutable queued deadline plus ten minutes; renewals cannot extend it.
 
@@ -36,7 +36,7 @@ A cancellation of queued work is immediately terminal. A cancellation of active 
 
 ## Browser protocol
 
-Connect with the normal session cookie and exact `PUBLIC_ORIGIN`. Missing/foreign Origins and invalid sessions are rejected. Browser session cookies require a same-origin reverse proxy, or a deliberate cookie/hosting design in the deployment stage. Handshake authentication does not grant lasting access: subscriptions and background delivery recheck the database session, including expiry/revocation.
+Connect with the normal session cookie from the exact `PUBLIC_ORIGIN`. Missing/foreign Origins and invalid sessions are rejected. Browser session cookies can use a same-origin reverse proxy or an HTTPS `API_ORIGIN` subdomain under the frontend's registrable domain. Handshake authentication does not grant lasting access: subscriptions and background delivery recheck the database session, including expiry/revocation.
 
 ```ts
 const socket = io('/executions', {transports: ['websocket']});

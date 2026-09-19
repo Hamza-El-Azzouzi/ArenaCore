@@ -41,7 +41,7 @@ export interface ProblemDetail extends ProblemSummary {
   templates: Record<Language, string>;
 }
 export interface PublicCaseResult {
-  caseId: string; verdict: Verdict; stdout?: string; stderr?: string; exitCode?: number; runtimeMs?: number; memoryKiB?: number;
+  caseId: string; verdict: Verdict; outputTruncated?: boolean; stdout?: string; stderr?: string; exitCode?: number; runtimeMs?: number; memoryKiB?: number;
 }
 export interface ExecutionSnapshot {
   executionId: string; problemId: string; language: Language; mode: ExecutionMode;
@@ -81,3 +81,8 @@ export const publicExecutionEventSchema = z.discriminatedUnion('kind', [
   z.strictObject({...eventIdentity, kind: z.literal('console_output'), caseId: uuidSchema, stream: z.enum(['stdout', 'stderr']), text: z.string().refine(v => new TextEncoder().encode(v).byteLength <= 4096)}),
   z.strictObject({...eventIdentity, kind: z.literal('final_verdict'), state: stateSchema, verdict: verdictSchema, failureCode: executionFailureCodeSchema.optional()}),
 ]);
+
+// Cleanup uncertainty must never be mistaken for a stopped, cancelled sandbox.
+export class SandboxCleanupError extends Error {
+  constructor(){super('SANDBOX_CLEANUP_UNCONFIRMED');this.name='SandboxCleanupError';}
+}

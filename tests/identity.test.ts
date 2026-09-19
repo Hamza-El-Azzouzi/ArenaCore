@@ -23,10 +23,15 @@ describe('OIDC configuration and login proof encryption', () => {
     expect(() => parseConfig({...base, OIDC_TRANSACTION_KEY: 'PRIVATE_INVALID_KEY'})).toThrow('Invalid configuration: OIDC_TRANSACTION_KEY');
   });
   it('redacts malformed URL configuration values', () => {
-    for (const key of ['OIDC_ISSUER', 'PUBLIC_ORIGIN']) {
+    for (const key of ['OIDC_ISSUER', 'PUBLIC_ORIGIN', 'API_ORIGIN']) {
       try { parseConfig({...base, [key]: 'PRIVATE_INVALID_URL'}); throw new Error('Should fail'); }
       catch (error) { expect((error as Error).message).toContain('Invalid configuration'); expect((error as Error).message).not.toContain('PRIVATE_INVALID_URL'); }
     }
+  });
+  it('accepts distinct HTTPS frontend and API origins and rejects insecure production API origins', () => {
+    expect(() => parseConfig({...base, NODE_ENV: 'production', PUBLIC_ORIGIN: 'https://arena.example', API_ORIGIN: 'http://api.example'})).toThrow('API_ORIGIN');
+    const parsed = parseConfig({...base, NODE_ENV: 'production', PUBLIC_ORIGIN: 'https://arena.example', API_ORIGIN: 'https://api.example'});
+    expect(parsed.API_ORIGIN).toBe('https://api.example');
   });
   it('encrypts with random IVs and authenticates ciphertext, key and state binding', () => {
     const key = randomBytes(32), state = 'a'.repeat(64), proof = {verifier: token(), nonce: token()};

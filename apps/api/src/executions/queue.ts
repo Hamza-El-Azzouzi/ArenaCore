@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import { Execution, OutboxEvent } from '@prisma/client';
+import { SandboxCleanupError } from '@arenacore/contracts';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { Config } from '../config/config';
@@ -43,7 +44,7 @@ export class OutboxDispatcher {
   }
 }
 export interface ExecutionBackend {
-  // Must resolve OR reject only after every sandbox process has stopped.
+  // Normal settlement requires stopped processes; SandboxCleanupError explicitly reports uncertainty.
   execute(context: {execution:Execution;signal:AbortSignal;markRunning:()=>Promise<boolean>;console:(caseId:string,stream:'stdout'|'stderr',text:string)=>Promise<boolean>}):Promise<WorkerResult>;
 }
 export function startExecutionWorker(jobs: JobStore, url: string, queueName: string, backend: ExecutionBackend) {
@@ -62,7 +63,7 @@ export function startExecutionWorker(jobs: JobStore, url: string, queueName: str
     try {
       const result=await backend.execute({execution,signal:abort.signal,markRunning:()=>jobs.markRunning(lease),console:(caseId,stream,text)=>jobs.console(lease,caseId,stream,text)});
       await jobs.finish(lease,result);
-    } catch {await jobs.fail(lease);} finally {clearInterval(timer);await pending;}
+    } catch(e) {await jobs.fail(lease, !(e instanceof SandboxCleanupError));} finally {clearInterval(timer);await pending;}
   },{connection:redisOptions(url,true),concurrency:2,lockDuration:30000,maxStalledCount:1});
   // Never log Redis credentials, queue data, source, or backend exception text.
   worker.on('error',()=>{});

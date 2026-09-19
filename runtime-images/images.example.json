@@ -1,0 +1,5 @@
+{
+  "java": "registry.example/arenacore/java@sha256:REPLACE_WITH_VERIFIED_DIGEST",
+  "python": "registry.example/arenacore/python@sha256:REPLACE_WITH_VERIFIED_DIGEST",
+  "javascript": "registry.example/arenacore/javascript@sha256:REPLACE_WITH_VERIFIED_DIGEST"
+}

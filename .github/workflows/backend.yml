@@ -27,6 +27,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
+      TEST_RUNNER_RPC: 'true'
       TEST_REDIS_URL: redis://localhost:6379/0
       DATABASE_URL: postgresql://arenacore:integration-only@localhost:5432/arenacore_test
       TEST_DATABASE_URL: postgresql://arenacore:integration-only@localhost:5432/arenacore_test
@@ -43,3 +44,91 @@ jobs:
       - run: npm run db:seed
       - run: npm run check
       - run: npm audit --audit-level=moderate
+
+  deploy-application:
+    name: Deploy application server
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_APPLICATION == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: arenacore-production-application
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Package tested source
+        run: git archive --format=tar.gz --output="/tmp/arenacore-${GITHUB_SHA}.tar.gz" "${GITHUB_SHA}"
+      - name: Configure authenticated SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.APP_SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ secrets.APP_SSH_HOST_KEY }}
+        run: |
+          set -eu
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 0600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SSH_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+      - name: Upload and activate release
+        env:
+          DEPLOY_HOST: ${{ secrets.APP_SSH_HOST }}
+          DEPLOY_PORT: ${{ secrets.APP_SSH_PORT }}
+          DEPLOY_USER: ${{ secrets.APP_SSH_USER }}
+        run: |
+          set -eu
+          port="${DEPLOY_PORT:-22}"
+          archive="/tmp/arenacore-${GITHUB_SHA}.tar.gz"
+          remote_archive="/tmp/arenacore-${GITHUB_SHA}.tar.gz"
+          scp -P "$port" -i "$HOME/.ssh/deploy_key" "$archive" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_archive}"
+          scp -P "$port" -i "$HOME/.ssh/deploy_key" infra/deploy/activate-release.sh \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/arenacore-activate-release.sh"
+          ssh -p "$port" -i "$HOME/.ssh/deploy_key" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash /tmp/arenacore-activate-release.sh application '${GITHUB_SHA}' '${remote_archive}'"
+
+  deploy-runner:
+    name: Deploy isolated runner
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_RUNNER == 'true'
+    runs-on: ubuntu-latest
+    environment: production-runner
+    concurrency:
+      group: arenacore-production-runner
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Package tested source
+        run: git archive --format=tar.gz --output="/tmp/arenacore-${GITHUB_SHA}.tar.gz" "${GITHUB_SHA}"
+      - name: Configure authenticated SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.RUNNER_SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ secrets.RUNNER_SSH_HOST_KEY }}
+        run: |
+          set -eu
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 0600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SSH_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+      - name: Upload and activate release
+        env:
+          DEPLOY_HOST: ${{ secrets.RUNNER_SSH_HOST }}
+          DEPLOY_PORT: ${{ secrets.RUNNER_SSH_PORT }}
+          DEPLOY_USER: ${{ secrets.RUNNER_SSH_USER }}
+        run: |
+          set -eu
+          port="${DEPLOY_PORT:-22}"
+          archive="/tmp/arenacore-${GITHUB_SHA}.tar.gz"
+          remote_archive="/tmp/arenacore-${GITHUB_SHA}.tar.gz"
+          scp -P "$port" -i "$HOME/.ssh/deploy_key" "$archive" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_archive}"
+          scp -P "$port" -i "$HOME/.ssh/deploy_key" infra/deploy/activate-release.sh \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/arenacore-activate-release.sh"
+          ssh -p "$port" -i "$HOME/.ssh/deploy_key" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash /tmp/arenacore-activate-release.sh runner '${GITHUB_SHA}' '${remote_archive}'"

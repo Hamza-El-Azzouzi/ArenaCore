@@ -14,7 +14,7 @@ export interface Lease { executionId: string; attempt: number; token: string }
 export const resultSchema = z.strictObject({
   verdict: verdictSchema.exclude(['CANCELLED', 'INTERNAL_ERROR']),
   runtimeMs: z.number().int().nonnegative().optional(), memoryKiB: z.number().int().nonnegative().optional(),
-  publicCaseResults: z.array(z.strictObject({caseId: z.uuid(), verdict: verdictSchema.exclude(['CANCELLED','INTERNAL_ERROR']), stdout: z.string().optional(), stderr: z.string().optional(), exitCode: z.number().int().optional(), runtimeMs: z.number().int().nonnegative().optional(), memoryKiB: z.number().int().nonnegative().optional()})).max(100).optional(),
+  publicCaseResults: z.array(z.strictObject({caseId: z.uuid(), verdict: verdictSchema.exclude(['CANCELLED','INTERNAL_ERROR']), outputTruncated: z.boolean().optional(), stdout: z.string().optional(), stderr: z.string().optional(), exitCode: z.number().int().optional(), runtimeMs: z.number().int().nonnegative().optional(), memoryKiB: z.number().int().nonnegative().optional()})).max(100).optional(),
 });
 export type WorkerResult = z.infer<typeof resultSchema>;
 export function safeConsole(text: string) {
@@ -112,11 +112,11 @@ export class JobStore {
       await tx.execution.update({where:{id:row.id},data:{state:'FINISHED',verdict:result.verdict,finishedAt:new Date(),lastSequence:seq,leaseToken:null,leaseExpiresAt:null,runtimeMs:result.runtimeMs,memoryKiB:result.memoryKiB,...(results?{publicResults:results}:{})}});return true;
     });
   }
-  async fail(lease: Lease) {
+  async fail(lease: Lease, cleanupConfirmed = true) {
     return this.db.$transaction(async tx => {
       const row=await this.locked(tx,lease.executionId);
       if (!row || !this.valid(row,lease)) return false;
-      await this.terminal(tx,row,row.cancellationRequestedAt?'CANCELLED':'INTERNAL_ERROR',row.cancellationRequestedAt?undefined:'JOB_FAILURE');return true;
+      await this.terminal(tx,row,row.cancellationRequestedAt && cleanupConfirmed?'CANCELLED':'INTERNAL_ERROR',row.cancellationRequestedAt?(cleanupConfirmed?undefined:'CANCELLATION_TIMEOUT'):'JOB_FAILURE');return true;
     });
   }
   async cancel(userId: string, id: string, activeAllowed: boolean) {

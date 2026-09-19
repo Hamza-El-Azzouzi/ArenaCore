@@ -10,7 +10,7 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "npm run build -w @arenacore/contracts && npm run build -w @arenacore/judge && npm run build -w @arenacore/api",
+    "build": "npm run build -w @arenacore/contracts && npm run build -w @arenacore/runtime-policy && npm run build -w @arenacore/judge && npm run build -w @arenacore/runner && npm run build -w @arenacore/api",
     "typecheck": "npm run build && tsc -p tsconfig.json",
     "test": "npm run build && vitest run",
     "dev:api": "npm run build -w @arenacore/contracts && node --env-file=.env node_modules/tsx/dist/cli.mjs watch apps/api/src/main.ts",
@@ -19,7 +19,11 @@
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "check": "npm run db:validate && npm run typecheck && vitest run"
+    "check": "npm run db:validate && npm run typecheck && vitest run",
+    "runner:preflight": "node apps/runner/dist/preflight.js",
+    "runner:supervisor": "node apps/runner/dist/main.js",
+    "runner:janitor": "node apps/runner/dist/main.js --janitor",
+    "runner:worker": "node apps/api/dist/executions/worker-main.js"
   },
   "dependencies": {
     "@prisma/client": "6.19.0",

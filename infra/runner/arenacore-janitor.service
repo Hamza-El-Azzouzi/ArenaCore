@@ -1,0 +1,17 @@
+[Unit]
+Description=ArenaCore independent abandoned sandbox cleanup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=arenacore-supervisor
+Group=arenacore-runner
+SupplementaryGroups=docker
+WorkingDirectory=/opt/arenacore/current
+Environment=RUNNER_IMAGE_MANIFEST=/etc/arenacore/runtime-images.json
+ExecStart=/usr/bin/node /opt/arenacore/current/apps/runner/dist/main.js --janitor
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

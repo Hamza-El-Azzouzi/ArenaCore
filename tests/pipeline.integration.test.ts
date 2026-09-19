@@ -4,6 +4,8 @@ import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Queue, Worker } from 'bullmq';
 import { io, Socket } from 'socket.io-client';
+import { JudgingBackend, loadJudgePlan } from '../apps/runner/src/judging-backend';
+import { SandboxCleanupError } from '@arenacore/contracts';
 import { Database } from '../apps/api/src/database/database';
 import { JobStore, REPLAY_ROWS, REPLAY_BYTES } from '../apps/api/src/executions/job-store';
 import { OutboxDispatcher, redisOptions, startExecutionWorker } from '../apps/api/src/executions/queue';
@@ -95,6 +97,24 @@ suite('durable queue, leases, cancellation, public replay and socket authorizati
     await dispatcher.tick();await until(async()=> (await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='FINISHED');expect(calls).toBe(1);
     const replay=await jobs.replay(userId,row.id,1,0);expect(replay.replayAvailable).toBe(true);expect(replay.events.map(e=>e.kind)).toEqual(['execution_status','execution_status','console_output','final_verdict']);expect(replay.snapshot.publicCaseResults![0]!.stdout).toBe('5\n');
   });
+  it('judges a real queued Submit without publishing hidden diagnostics',async()=>{
+    const row=await fixture('SUBMIT');
+    const backend=new JudgingBackend({execute:async request=>{
+      const cases=await db.testCase.findMany({where:{id:{in:request.cases.map(c=>c.id)}}});
+      return {cases:request.cases.map(c=>{const test=cases.find(t=>t.id===c.id)!;return {caseId:c.id,stdout:test.visibility==='HIDDEN'?'SECRET_HIDDEN_OUTPUT':test.expectedOutput,stderr:'SECRET_HIDDEN_TRACE',exitCode:0,wallMs:1};})};
+    }},(id,mode)=>loadJudgePlan(db,id,mode));
+    worker(backend);await dispatcher.tick();await until(async()=>(await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='FINISHED');
+    const stored=await db.execution.findUniqueOrThrow({where:{id:row.id}});expect(stored.verdict).toBe('WRONG_ANSWER');expect(stored.publicResults).toBeNull();
+    const replay=await jobs.replay(userId,row.id,1,0);expect(JSON.stringify(replay)).not.toMatch(/SECRET_HIDDEN|PRIVATE_SOURCE_SENTINEL/);expect(replay.events.some(e=>e.kind==='console_output')).toBe(false);
+  });
+  it('judges public RUN cases and persists only public case results',async()=>{
+    const row=await fixture('RUN');const backend=new JudgingBackend({execute:async request=>{
+      const plan=await loadJudgePlan(db,row.problemVersionId,'RUN');expect(request.cases).toHaveLength(plan.cases.length);
+      return {cases:plan.cases.map(c=>({caseId:c.id,stdout:c.expectedOutput,stderr:'',exitCode:0,wallMs:1}))};
+    }},(id,mode)=>loadJudgePlan(db,id,mode));
+    worker(backend);await dispatcher.tick();await until(async()=>(await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='FINISHED');
+    const replay=await jobs.replay(userId,row.id,1,0);expect(replay.snapshot.verdict).toBe('ACCEPTED');expect(replay.snapshot.publicCaseResults).toHaveLength(2);expect(replay.events.filter(e=>e.kind==='console_output')).toHaveLength(2);expect(JSON.stringify(replay.snapshot.publicCaseResults)).not.toContain(hiddenId);
+  });
   it('records cancellation as pending until the backend confirms cleanup',async()=>{
     const row=await fixture();let started=false,aborted=false,release!:()=>void;
     worker({execute:async ctx=>{started=true;await ctx.markRunning();await new Promise<void>(resolve=>{release=resolve;ctx.signal.addEventListener('abort',()=>{aborted=true;},{once:true});});return {verdict:'ACCEPTED'};}});
@@ -102,6 +122,9 @@ suite('durable queue, leases, cancellation, public replay and socket authorizati
     expect((await jobs.cancel(userId,row.id,true)).cancellationRequested).toBe(true);await until(()=>aborted);
     expect((await db.execution.findUniqueOrThrow({where:{id:row.id}})).state).toBe('RUNNING');release();
     await until(async()=>(await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='CANCELLED');
+  });
+  it('does not report cancellation when backend cleanup fails',async()=>{
+    const row=await fixture();let started=false;worker({execute:async ctx=>{started=true;await new Promise<void>(resolve=>ctx.signal.addEventListener('abort',()=>resolve(),{once:true}));throw new SandboxCleanupError();}});await dispatcher.tick();await until(()=>started);await jobs.cancel(userId,row.id,true);await until(async()=>(await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='INTERNAL_ERROR');expect((await db.execution.findUniqueOrThrow({where:{id:row.id}})).failureCode).toBe('CANCELLATION_TIMEOUT');
   });
   it('does not label a lost cancelled worker as safely stopped',async()=>{
     const row=await fixture();await jobs.claim(row.id);await jobs.cancel(userId,row.id,true);await expire(row.id);await jobs.maintain();

@@ -4,7 +4,7 @@ import { verdictSchema } from '@arenacore/contracts';
 
 const publicResultsSchema = z.array(z.strictObject({
   caseId: z.string(), verdict: verdictSchema,
-  stdout: z.string().optional(), stderr: z.string().optional(), exitCode: z.number().int().optional(),
+  outputTruncated: z.boolean().optional(), stdout: z.string().optional(), stderr: z.string().optional(), exitCode: z.number().int().optional(),
   runtimeMs: z.number().nonnegative().optional(), memoryKiB: z.number().nonnegative().optional(),
 }));
 interface StoredExecution {

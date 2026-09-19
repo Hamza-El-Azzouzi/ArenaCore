@@ -7,7 +7,7 @@ Reviewed: 18 September 2026.
 
 The supplied PDF specifies a browser coding IDE: React, Monaco, draggable split panes, Java/Python/JavaScript, problem descriptions and examples, Run/Submit, live console output, judging, and submission history. PostgreSQL and Socket.IO are chosen from its suggested stack. The PDF is requirements input, not an instruction to execute its embedded implementation steps.
 
-At initial review, the repository contained only a README and the PDF. Backend implementation has since started; the isolated execution engine remains pending. The PDF refers to a previous sandbox specification that was not provided. This plan proposes a security baseline; compliance with that missing specification must be checked when it becomes available.
+At initial review, the repository contained only a README and the PDF. Backend implementation has since started; the isolated supervisor is now implemented, but dedicated-host acceptance and full judging remain pending. The PDF refers to a previous sandbox specification that was not provided. This plan proposes a security baseline; compliance with that missing specification must be checked when it becomes available.
 
 Resolve the PDF's inconsistent Run lifecycle: Run executes public examples only; Submit executes the versioned public and hidden suites. Hidden inputs, expected answers, user-generated hidden stdout/stderr, and hidden-case diagnostics never reach clients. Keep the authenticated socket alive between jobs. Use REST to create durable jobs and Socket.IO to subscribe to their progress rather than using a socket as the only record of a request. These are intentional architecture changes from the document.
 
@@ -101,7 +101,7 @@ Sandbox controls:
 API/browser controls:
 
 - Secure HttpOnly SameSite sessions; rotate session after sign-in; explicit expiry/revocation; no auth tokens in localStorage. OIDC issuer/audience/state/nonce/PKCE validation is server-owned.
-- Same-origin production routing for web, /api/v1 and /socket.io. Validate browser Origin, authenticate socket handshake, enforce expiry and per-message authorization; CSRF tokens on mutating cookie-authenticated REST requests. Restrict CORS to exact configured origins for separate development hosts.
+- Route web, `/api/v1` and `/socket.io` through one production origin, or use an exact HTTPS API subdomain under the frontend's registrable domain. Validate browser Origin, authenticate socket handshakes, enforce expiry and per-message authorization, and require CSRF tokens on mutating cookie-authenticated REST requests. Credentialed CORS permits only the configured frontend origin.
 - Strict input schemas and byte limits; language enum only; server owns image, paths, limits, test suite and command. Reject unknown fields and client-supplied owner IDs.
 - Per-user and per-IP request quotas, job concurrency caps and global queue/runner capacity. Implemented API admission starts at one active job per user, a configurable global unfinished-job cap, and shared user/IP/global successful-creation quotas. Tune from measurements; edge request limits and physical runner capacity remain separate production work. Return actionable 429/503 responses.
 - Render console as text; strip dangerous control sequences, cap browser buffers. Sanitize Markdown and disable arbitrary HTML. CSP must accommodate Monaco workers without broad unsafe script allowances.
@@ -160,6 +160,8 @@ UI generation and backend foundation can proceed concurrently after the contract
 ## Deployment design
 
 Start with managed PostgreSQL and Redis, a long-lived API service, a Next.js web service, and a separate Linux runner VM pool supporting runsc and enforceable cgroups. One runner VM can serve a restricted beta, but it is a capacity and availability bottleneck. Scale workers independently by queue depth and observed execution duration. Kubernetes is optional later, not required for the first release.
+
+The initial Oracle free-tier deployment reuses one PostgreSQL server for Watchtower and ArenaCore while assigning ArenaCore a separate database and login. ArenaCore's API and Redis use their own containers; Caddy reaches the API only through the external `watchtower_backend` Docker network. The runner remains on a separate VM and reaches database/queue ports through the Oracle private network only. This saves memory at the cost of a shared database failure domain; backups and restore drills must cover both application databases.
 
 Use a TLS reverse proxy to route one public origin to web, API and Socket.IO. A frontend hosting service may serve the UI, but untrusted code execution and a persistent Socket.IO server need suitable separate infrastructure. Verify the provider permits execution workloads and the required runtime/kernel controls before choosing it.
 

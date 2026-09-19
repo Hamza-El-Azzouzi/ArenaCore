@@ -14,10 +14,18 @@ export async function createApp() {
 }
 
 export function configureApp(app: NestExpressApplication) {
-  const proxyCidrs = app.get(Config).values.TRUST_PROXY_CIDRS;
+  const config = app.get(Config);
+  const proxyCidrs = config.values.TRUST_PROXY_CIDRS;
   if (proxyCidrs) app.set('trust proxy', proxyCidrs.split(',').map(cidr => cidr.trim()));
   app.disable('x-powered-by');
   app.setGlobalPrefix('api/v1');
+  app.enableCors({
+    origin: config.values.PUBLIC_ORIGIN,
+    credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Idempotency-Key', 'X-CSRF-Token'],
+    maxAge: 600,
+  });
   app.use(helmet());
   app.use((_req: unknown, res: {setHeader: (name: string, value: string) => void}, next: () => void) => {res.setHeader('X-Request-Id', randomUUID()); res.setHeader('Cache-Control', 'no-store'); next();});
   // Leave room for JSON escaping of a source string; source itself has its own UTF-8 byte cap.

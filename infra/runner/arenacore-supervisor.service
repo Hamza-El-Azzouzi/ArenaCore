@@ -1,0 +1,28 @@
+[Unit]
+Description=ArenaCore private gVisor supervisor
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=arenacore-supervisor
+Group=arenacore-runner
+SupplementaryGroups=docker
+WorkingDirectory=/opt/arenacore/current
+RuntimeDirectory=arenacore
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=RUNNER_IMAGE_MANIFEST=/etc/arenacore/runtime-images.json
+Environment=RUNNER_SOCKET_PATH=/run/arenacore/supervisor.sock
+ExecStart=/usr/bin/node /opt/arenacore/current/apps/runner/dist/main.js
+# Never automatically unlink a socket which could belong to a live supervisor.
+Restart=no
+TimeoutStopSec=50
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/arenacore
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@arenacore/contracts": "0.1.0"
+    "@arenacore/contracts": "0.1.0",
+    "zod": "^4.1.0"
   }
 }

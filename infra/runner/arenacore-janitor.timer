@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile expired ArenaCore sandboxes independently of workers
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+Unit=arenacore-janitor.service
+
+[Install]
+WantedBy=timers.target

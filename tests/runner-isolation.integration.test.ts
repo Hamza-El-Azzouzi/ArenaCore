@@ -1,0 +1,25 @@
+import {beforeAll,describe,it,expect} from 'vitest';
+import {readFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {SandboxSupervisor} from '../apps/runner/src/supervisor';
+import {DockerCli} from '../apps/runner/src/transport';
+const suite=process.env.TEST_RUNNER_ISOLATION==='true'?describe:describe.skip;
+suite('dedicated gVisor host: real functional and adversarial isolation',()=>{
+  let supervisor:SandboxSupervisor;
+  beforeAll(async()=>{if(!process.env.RUNNER_IMAGE_MANIFEST)throw new Error('RUNNER_IMAGE_MANIFEST_REQUIRED');supervisor=new SandboxSupervisor(new DockerCli(),JSON.parse(await readFile(process.env.RUNNER_IMAGE_MANIFEST,'utf8')));await supervisor.preflight();});
+  const sources={python:'print(sum(map(int,input().split())))',javascript:"let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>console.log(s.trim().split(/\\s+/).map(Number).reduce((a,b)=>a+b,0)));",java:'public class Solution { public static void main(String[] args) { java.util.Scanner s=new java.util.Scanner(System.in); System.out.println(s.nextInt()+s.nextInt()); } }'};
+  async function run(language:keyof typeof sources,sourceCode:string,timeMs=1500){return supervisor.execute({executionId:randomUUID(),attempt:1,language,sourceCode,cases:[{id:randomUUID(),input:'2 3\n'}],timeMs,memoryMiB:512},new AbortController().signal);}
+  it.each(['python','javascript','java'] as const)('runs %s only inside runsc',async language=>{const result=await run(language,sources[language]);expect(result.cases[0]!.stdout).toBe('5\n');expect(result.cases[0]!.exitCode).toBe(0);});
+  it('kills an infinite loop',async()=>{expect((await run('python','while True: pass',100)).cases[0]!.failure).toBe('TIME_LIMIT_EXCEEDED');});
+  it('caps output flooding',async()=>{expect((await run('python',"while True: print('x'*4096)")).cases[0]!.failure).toBe('OUTPUT_LIMIT_EXCEEDED');});
+  it('blocks internet and metadata connectivity',async()=>{const code="import socket\nfor ip in ['1.1.1.1','169.254.169.254']:\n try:\n  socket.create_connection((ip,80),timeout=.2);print('LEAK')\n except OSError: print('BLOCKED')";expect((await run('python',code)).cases[0]!.stdout).toBe('BLOCKED\nBLOCKED\n');});
+  it('has no Docker socket and root filesystem is read only',async()=>{const code="import os\nprint(os.path.exists('/var/run/docker.sock'))\ntry:\n open('/etc/arena_escape','w').write('x');print('LEAK')\nexcept OSError: print('BLOCKED')";expect((await run('python',code)).cases[0]!.stdout).toBe('False\nBLOCKED\n');});
+  it('uses fresh scratch for each case',async()=>{const code="import os\nprint(os.path.exists('/work/marker'))\nopen('/work/marker','w').write('x')";const r=await supervisor.execute({executionId:randomUUID(),attempt:1,language:'python',sourceCode:code,cases:[{id:randomUUID(),input:''},{id:randomUUID(),input:''}],timeMs:1000,memoryMiB:128},new AbortController().signal);expect(r.cases.map(c=>c.stdout)).toEqual(['False\n','False\n']);});
+  it('bounds guest memory without fabricating an OOM verdict',async()=>{const r=await run('python',"x=bytearray(1024*1024*1024)\nprint('LEAK')");expect(r.cases[0]!.exitCode).not.toBe(0);expect(r.cases[0]!.stdout).not.toContain('LEAK');});
+  it('enforces the process cap and cleans surviving children',async()=>{const code="import os,time\nfor i in range(128):\n try:\n  pid=os.fork()\n  if pid==0:\n   time.sleep(5);os._exit(0)\n except OSError:\n  print('BLOCKED',flush=True);break\nelse: print('LEAK',flush=True)";const r=await run('python',code);expect(r.cases[0]!.stdout).toContain('BLOCKED');expect(r.cases[0]!.stdout).not.toContain('LEAK');});
+  it('enforces scratch capacity across multiple bounded files',async()=>{const code="try:\n for i in range(8):\n  open('/work/f'+str(i),'wb').write(b'x'*(6*1024*1024))\n print('LEAK')\nexcept OSError: print('BLOCKED')";expect((await run('python',code)).cases[0]!.stdout).toBe('BLOCKED\n');});
+  it('exposes no worker database or cloud credentials',async()=>{const code="import os\nkeys=['DATABASE_URL','REDIS_URL','OIDC_CLIENT_SECRET','AWS_SECRET_ACCESS_KEY','GOOGLE_APPLICATION_CREDENTIALS']\nprint(any(k in os.environ for k in keys))";expect((await run('python',code)).cases[0]!.stdout).toBe('False\n');});
+  it('cleans a cancelled guest and any child process',async()=>{const id=randomUUID(),abort=new AbortController();const call=supervisor.execute({executionId:id,attempt:1,language:'python',sourceCode:'import os,time\nif os.fork()==0: time.sleep(100)\nelse: time.sleep(100)',cases:[{id:randomUUID(),input:''}],timeMs:10000,memoryMiB:128},abort.signal);setTimeout(()=>abort.abort(),500);await expect(call).rejects.toThrow();expect((await new DockerCli().command(['ps','--all','--quiet','--filter',`label=arenacore.execution=${id}`])).stdout.toString().trim()).toBe('');});
+  it('rejects malformed Java without leaving a compiler sandbox',async()=>{const result=await run('java','public class Solution { INVALID JAVA }');expect(result.compilation!.ok).toBe(false);expect(result.cases).toEqual([]);});
+
+});

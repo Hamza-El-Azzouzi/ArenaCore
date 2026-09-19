@@ -178,14 +178,14 @@ integration('OIDC protocol and session integration', () => {
     expect(await db.user.count({where: {issuer: provider.issuer, subject: provider.subject}})).toBe(1);
   });
   it('sets Secure __Host cookies and uses configured origin despite spoofed Host headers', async () => {
-    const oldMode = config.values.NODE_ENV, oldOrigin = config.values.PUBLIC_ORIGIN;
-    config.values.NODE_ENV = 'production'; config.values.PUBLIC_ORIGIN = 'https://arena.example.test';
+    const oldMode = config.values.NODE_ENV, oldOrigin = config.values.PUBLIC_ORIGIN, oldApiOrigin = config.values.API_ORIGIN;
+    config.values.NODE_ENV = 'production'; config.values.PUBLIC_ORIGIN = 'https://arena.example.test'; config.values.API_ORIGIN = 'https://api-arena.example.test';
     try {
       currentRateKeys();
       const response = await request('/auth/login', {headers: {host: 'attacker.example.test', 'x-forwarded-host': 'attacker.example.test'}});
       expect(response.status).toBe(302);
       const authorization = new URL(response.headers.get('location')!);
-      expect(authorization.searchParams.get('redirect_uri')).toBe('https://arena.example.test/api/v1/auth/callback');
+      expect(authorization.searchParams.get('redirect_uri')).toBe('https://api-arena.example.test/api/v1/auth/callback');
       const state = authorization.searchParams.get('state')!; stateHashes.add(hashToken(state));
       const cookieHeader = response.headers.getSetCookie()[0]!;
       expect(cookieHeader).toMatch(/^__Host-arenacore_oidc=/); expect(cookieHeader).toContain('Secure'); expect(cookieHeader).not.toContain('Domain=');
@@ -194,7 +194,7 @@ integration('OIDC protocol and session integration', () => {
       expect(result.headers.getSetCookie()[0]).toMatch(/^__Host-arenacore_session=/);
       expect(result.headers.getSetCookie()[0]).toContain('Secure');
       expect(result.headers.get('location')).toBe('https://arena.example.test/problems');
-    } finally {config.values.NODE_ENV = oldMode; config.values.PUBLIC_ORIGIN = oldOrigin;}
+    } finally {config.values.NODE_ENV = oldMode; config.values.PUBLIC_ORIGIN = oldOrigin; config.values.API_ORIGIN = oldApiOrigin;}
   });
   it('requires CSRF on logout and revokes the issued session', async () => {
     const me = await body<Me>(await request('/me', {headers: {cookie: sessionCookie}}));

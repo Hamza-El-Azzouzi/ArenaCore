@@ -71,6 +71,13 @@ integration('real PostgreSQL API integration', () => {
     expect(response.status).toBe(400);
     expect((await json<{error: {requestId: string}}>(response)).error.requestId).toBeTruthy();
   });
+  it('allows credentialed CORS only for the configured frontend origin', async () => {
+    const allowed = await fetch(`${base}/me`, {method: 'OPTIONS', headers: {origin, 'access-control-request-method': 'GET'}});
+    expect(allowed.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(allowed.headers.get('access-control-allow-credentials')).toBe('true');
+    const denied = await fetch(`${base}/me`, {method: 'OPTIONS', headers: {origin: 'https://evil.example', 'access-control-request-method': 'GET'}});
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
   it('enforces published problem/test immutability at the database boundary', async () => {
     await expect(db.problemVersion.update({where: {id: sampleVersionId}, data: {title: 'tampered'}})).rejects.toThrow();
     await expect(db.testCase.updateMany({where: {problemVersionId: sampleVersionId}, data: {expectedOutput: 'tampered'}})).rejects.toThrow();

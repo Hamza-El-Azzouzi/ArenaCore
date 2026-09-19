@@ -8,6 +8,7 @@ const envSchema = z.object({
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   PUBLIC_ORIGIN: z.url().default('http://localhost:3000'),
+  API_ORIGIN: optionalString(z.string().url()),
   DATABASE_URL: z.string().url().refine(value => /^postgres(ql)?:\/\//.test(value), 'PostgreSQL URL required'),
   EXECUTIONS_ENABLED: z.enum(['true', 'false']).default('false'),
   PIPELINE_ENABLED: z.enum(['true', 'false']).default('false'),
@@ -74,11 +75,18 @@ const envSchema = z.object({
   if (origin.origin !== env.PUBLIC_ORIGIN || origin.username || origin.password) {
     ctx.addIssue({ code: 'custom', path: ['PUBLIC_ORIGIN'], message: 'Use an exact origin without path, credentials or trailing slash' });
   }
+  const apiOrigin = env.API_ORIGIN && URL.canParse(env.API_ORIGIN) ? new URL(env.API_ORIGIN) : undefined;
+  if (env.API_ORIGIN && (!apiOrigin || !['http:', 'https:'].includes(apiOrigin.protocol) || apiOrigin.origin !== env.API_ORIGIN || apiOrigin.username || apiOrigin.password)) {
+    ctx.addIssue({ code: 'custom', path: ['API_ORIGIN'], message: 'Use an exact HTTP or HTTPS origin without path, credentials or trailing slash' });
+  }
   if (env.NODE_ENV === 'production' && env.EXECUTIONS_ENABLED === 'true') {
     ctx.addIssue({ code: 'custom', path: ['EXECUTIONS_ENABLED'], message: 'Production execution is not supported in this foundation release' });
   }
   if (env.NODE_ENV === 'production' && origin.protocol !== 'https:') {
     ctx.addIssue({ code: 'custom', path: ['PUBLIC_ORIGIN'], message: 'Production origin must use HTTPS' });
+  }
+  if (env.NODE_ENV === 'production' && apiOrigin && apiOrigin.protocol !== 'https:') {
+    ctx.addIssue({ code: 'custom', path: ['API_ORIGIN'], message: 'Production API origin must use HTTPS' });
   }
 });
 export function parseConfig(env: NodeJS.ProcessEnv) {
@@ -92,8 +100,9 @@ export class Config {
   readonly values = parseConfig(process.env);
   get executionsEnabled() { return this.values.EXECUTIONS_ENABLED === 'true'; }
   get oidcEnabled() { return this.values.OIDC_ENABLED === 'true'; }
-  get secureCookies() { return this.values.PUBLIC_ORIGIN.startsWith('https:'); }
-  get callbackUrl() { return `${this.values.PUBLIC_ORIGIN}/api/v1/auth/callback`; }
+  get apiOrigin() { return this.values.API_ORIGIN ?? this.values.PUBLIC_ORIGIN; }
+  get secureCookies() { return this.apiOrigin.startsWith('https:'); }
+  get callbackUrl() { return `${this.apiOrigin}/api/v1/auth/callback`; }
   get loginCookieName() { return this.values.NODE_ENV === 'production' ? '__Host-arenacore_oidc' : 'arenacore_oidc'; }
   get cookieName() { return this.values.NODE_ENV === 'production' ? '__Host-arenacore_session' : 'arenacore_session'; }
 }

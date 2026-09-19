@@ -24,7 +24,8 @@ Copy the settings from `.env.example` into your private root `.env` or managed d
 - `OIDC_TRANSACTION_KEY`: a random 32-byte key encoded in standard base64. Generate with `openssl rand -base64 32` and store privately. Never commit it. All API instances must use the same key; changing it invalidates in-flight login attempts.
 - `OIDC_CLIENT_AUTH_METHOD`: the method registered with the provider.
 - `OIDC_ID_TOKEN_ALG`: the registered signed ID-token algorithm (`RS256` or `ES256`).
-- `PUBLIC_ORIGIN`: exact browser origin, without trailing slash. Production requires HTTPS.
+- `PUBLIC_ORIGIN`: exact frontend/browser origin, without trailing slash. Production requires HTTPS.
+- `API_ORIGIN`: exact API origin when it uses a separate subdomain. The OIDC callback uses `${API_ORIGIN}/api/v1/auth/callback`; when omitted it falls back to `PUBLIC_ORIGIN` for same-origin proxy deployments.
 
 Optional controls: `SESSION_TTL_SECONDS` (default 8 hours, maximum 24 hours), per-IP/global login caps, and `TRUST_PROXY_CIDRS`. Leave proxy trust empty unless a known reverse proxy is configured. Use only its precise IP/CIDRs, restrict direct API access, and configure the proxy to overwrite forwarded headers. Trust-all, hop-count settings and `/0` CIDRs are rejected. API instances share database-backed login counters.
 
