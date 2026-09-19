@@ -41,7 +41,11 @@ export class SandboxSupervisor {
       if(signal.aborted)throw new DockerError('ABORTED');
       await this.verifyContainer(name,phase==='compile'?CAPS.compileMemoryMiB:request.memoryMiB);
       await this.docker.command(['start',name],{signal});
-      await this.docker.command(['cp','-',`${name}:/work`],{input:archive,signal});
+      // Docker refuses `docker cp` into a read-only container even when the
+      // destination is a writable tmpfs. Extract the trusted, normalized
+      // archive as the nonroot guest instead; source bytes remain on stdin and
+      // never enter argv, an image layer, or the host filesystem.
+      await this.docker.command(['exec','--interactive',name,'/bin/tar','-x','-f','-','-C','/work'],{input:archive,signal});
       await body(name);
     } finally {
       try {await this.destroy(name);} catch {this.ready=false;throw new SandboxCleanupError();}

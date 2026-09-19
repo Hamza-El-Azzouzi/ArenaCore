@@ -23,6 +23,7 @@ class Engine implements DockerTransport {
     }
     if(args[0]==='rm'){if(!this.cleanupFails)this.containers.delete(args.at(-1)!);return result();}
     if(args[0]==='ps')return result([...this.containers.keys()].join('\n'));
+    if(args[0]==='exec'&&args.includes('/bin/tar'))return result();
     if(args[0]==='exec'){this.onExec?.();if(this.execError)throw this.execError;return result('5\n');}
     if(args[0]==='cp'&&args.at(-1)==='-')return {stdout:this.artifact!,stderr:Buffer.alloc(0),exitCode:0};
     return result();
@@ -42,6 +43,7 @@ describe('isolated runner policy and supervisor failure boundaries',()=>{
   it('cleans after abort during command execution',async()=>{const {engine,supervisor}=await ready();const abort=new AbortController();engine.onExec=()=>abort.abort();engine.execError=new DockerError('ABORTED');await expect(supervisor.execute(request(),abort.signal)).rejects.toThrow('ABORTED');expect(engine.containers.size).toBe(0);});
   it('rejects intake once shutdown starts',async()=>{const {supervisor}=await ready();supervisor.stopAccepting();await expect(supervisor.execute(request(),new AbortController().signal)).rejects.toThrow('RUNNER_NOT_READY');});
   it('generates hardened policies without source in command arguments',()=>{const r=request();const args=containerArgs(`ac-${randomUUID()}`,manifest.python,128,{executionId:r.executionId,attempt:1,deadline:Date.now()+30000});expect(args).toContain('--runtime=runsc');expect(args).toContain('--network=none');expect(args).toContain('--pull=never');expect(args.join(' ')).not.toContain(r.sourceCode);expect(args.some(a=>a.startsWith('--volume')||a.startsWith('--privileged'))).toBe(false);});
+  it('streams source into writable tmpfs without docker cp or argv exposure',async()=>{const {engine,supervisor}=await ready();await supervisor.execute(request(),new AbortController().signal);const transfer=engine.calls.find(a=>a[0]==='exec'&&a.includes('/bin/tar'))!;expect(transfer).toEqual(['exec','--interactive',expect.stringMatching(/^ac-/),'/bin/tar','-x','-f','-','-C','/work']);expect(engine.calls.some(a=>a[0]==='cp')).toBe(false);expect(transfer.join(' ')).not.toContain(request().sourceCode);});
   it('uses Ubuntu Docker path and rejects unsafe transport paths',()=>{expect(DEFAULT_DOCKER_BINARY).toBe('/usr/bin/docker');expect(()=>new DockerCli('docker')).toThrow();});
 });
 async function archive(name:string,type:'file'|'symlink',linkname?:string) {
