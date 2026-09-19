@@ -48,8 +48,11 @@ jobs:
         run: |
           set -u
           for attempt in 1 2 3; do
-            output="$(npm audit --audit-level=moderate 2>&1)"
-            status=$?
+            if output="$(npm audit --audit-level=moderate 2>&1)"; then
+              status=0
+            else
+              status=$?
+            fi
             printf '%s\n' "$output"
             if [ "$status" -eq 0 ]; then
               exit 0
