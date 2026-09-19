@@ -89,3 +89,11 @@ sudo bash infra/runner/bootstrap-host.sh
 ```
 
 The bootstrap is idempotent and ends with `RUNNER_BOOTSTRAP_INSTALLED_NOT_STARTED`. It grants Docker-group access only to `arenacore-supervisor`; the trusted judging worker must use a separate identity with access to the runner Unix socket but no Docker group membership. The bootstrap deliberately does not start or enable either service. Inspect the installed units and run the deployment activation separately.
+
+After activating a release while execution is still disabled, run the idle-only lifecycle verifier:
+
+```sh
+sudo bash infra/runner/verify-services.sh
+```
+
+It refuses to continue if any ArenaCore-managed sandbox exists. It verifies the systemd hardening properties, gracefully restarts the supervisor, checks the private socket through the supervisor identity, creates a stopped expired gVisor sandbox, and requires the independent janitor to remove it. Success prints `RUNNER_SERVICE_LIFECYCLE_PASSED`.

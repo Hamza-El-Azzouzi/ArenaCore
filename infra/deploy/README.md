@@ -113,6 +113,13 @@ not start them:
 sudo bash infra/runner/bootstrap-host.sh
 ```
 
+After the first runner release is activated, verify the idle service lifecycle and
+independent orphan cleanup before enabling the judging worker:
+
+```sh
+sudo bash infra/runner/verify-services.sh
+```
+
 For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,
 so secure host-only SameSite cookies remain available to credentialed API and Socket.IO
