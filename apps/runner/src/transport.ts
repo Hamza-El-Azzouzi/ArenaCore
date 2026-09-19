@@ -5,9 +5,10 @@ export interface CommandResult {stdout:Buffer;stderr:Buffer;exitCode:number}
 export interface DockerTransport {
   command(args:readonly string[],options?:{input?:Buffer;signal?:AbortSignal;timeoutMs?:number;maxBytes?:number;allowFailure?:boolean}):Promise<CommandResult>;
 }
+export const DEFAULT_DOCKER_BINARY='/usr/bin/docker';
 // Narrow environment: never inherit API/database/cloud credentials into CLI calls.
 export class DockerCli implements DockerTransport {
-  constructor(private readonly binary='/usr/local/bin/docker',private readonly socket='/var/run/docker.sock',private readonly configDir='/var/empty/arenacore-docker') {
+  constructor(private readonly binary=DEFAULT_DOCKER_BINARY,private readonly socket='/var/run/docker.sock',private readonly configDir='/var/empty/arenacore-docker') {
     if(!binary.startsWith('/') || !socket.startsWith('/') || !configDir.startsWith('/')) throw new Error('ABSOLUTE_PATH_REQUIRED');
   }
   command(args:readonly string[],options:{input?:Buffer;signal?:AbortSignal;timeoutMs?:number;maxBytes?:number;allowFailure?:boolean}={}):Promise<CommandResult> {

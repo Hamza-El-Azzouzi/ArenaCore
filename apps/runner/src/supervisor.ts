@@ -18,7 +18,7 @@ export class SandboxSupervisor {
     for(const image of Object.values(this.manifest)) {
       const result=await this.docker.command(['image','inspect',image,'--format','{{json .}}']);
       const data=z.object({RepoDigests:z.array(z.string()),Config:z.object({User:z.literal('10001:10001'),Env:z.array(z.string()).nullable()})}).parse(JSON.parse(result.stdout.toString()));
-      if(!data.RepoDigests.includes(image) || (data.Config.Env??[]).some(v=>!/^(PATH|LANG|LC_ALL|JAVA_HOME|JAVA_VERSION|NODE_VERSION|YARN_VERSION|PYTHON_VERSION|PYTHON_SHA256|GPG_KEY)=/.test(v)))throw new Error('UNTRUSTED_RUNTIME_IMAGE');
+      if(!data.RepoDigests.includes(image) || (data.Config.Env??[]).some(v=>!/^(PATH|LANG|LANGUAGE|LC_ALL|JAVA_HOME|JAVA_VERSION|NODE_VERSION|YARN_VERSION|PYTHON_VERSION|PYTHON_SHA256|GPG_KEY)=/.test(v)))throw new Error('UNTRUSTED_RUNTIME_IMAGE');
     }
     this.ready=true;
   }

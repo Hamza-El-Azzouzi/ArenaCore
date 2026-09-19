@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import * as tar from 'tar-stream';
 import { CAPS,containerArgs,manifestSchema,sandboxRequestSchema } from '@arenacore/runtime-policy';
 import { SandboxCleanupError } from '@arenacore/contracts';
-import { DockerCli,DockerError,DockerTransport,CommandResult } from '../apps/runner/src/transport';
+import { DEFAULT_DOCKER_BINARY,DockerCli,DockerError,DockerTransport,CommandResult } from '../apps/runner/src/transport';
 import { SandboxSupervisor } from '../apps/runner/src/supervisor';
 import { normalizeJavaArtifacts,packFiles } from '../apps/runner/src/artifacts';
 const manifest={java:`registry.example/java@sha256:${'a'.repeat(64)}`,python:`registry.example/python@sha256:${'b'.repeat(64)}`,javascript:`registry.example/node@sha256:${'c'.repeat(64)}`};
@@ -41,7 +41,7 @@ describe('isolated runner policy and supervisor failure boundaries',()=>{
   it('cleans after abort during command execution',async()=>{const {engine,supervisor}=await ready();const abort=new AbortController();engine.onExec=()=>abort.abort();engine.execError=new DockerError('ABORTED');await expect(supervisor.execute(request(),abort.signal)).rejects.toThrow('ABORTED');expect(engine.containers.size).toBe(0);});
   it('rejects intake once shutdown starts',async()=>{const {supervisor}=await ready();supervisor.stopAccepting();await expect(supervisor.execute(request(),new AbortController().signal)).rejects.toThrow('RUNNER_NOT_READY');});
   it('generates hardened policies without source in command arguments',()=>{const r=request();const args=containerArgs(`ac-${randomUUID()}`,manifest.python,128,{executionId:r.executionId,attempt:1,deadline:Date.now()+30000});expect(args).toContain('--runtime=runsc');expect(args).toContain('--network=none');expect(args).toContain('--pull=never');expect(args.join(' ')).not.toContain(r.sourceCode);expect(args.some(a=>a.startsWith('--volume')||a.startsWith('--privileged'))).toBe(false);});
-  it('rejects unsafe Docker transport paths',()=>{expect(()=>new DockerCli('docker')).toThrow();});
+  it('uses Ubuntu Docker path and rejects unsafe transport paths',()=>{expect(DEFAULT_DOCKER_BINARY).toBe('/usr/bin/docker');expect(()=>new DockerCli('docker')).toThrow();});
 });
 async function archive(name:string,type:'file'|'symlink',linkname?:string) {
   const pack=tar.pack();const chunks:Buffer[]=[];const done=new Promise<Buffer>((resolve,reject)=>{pack.on('data',(b:Buffer)=>chunks.push(b));pack.on('end',()=>resolve(Buffer.concat(chunks)));pack.on('error',reject);});pack.entry({name,type,linkname},type==='file'?Buffer.from('class'):undefined);pack.finalize();return done;
