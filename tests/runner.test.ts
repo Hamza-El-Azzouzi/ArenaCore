@@ -19,11 +19,11 @@ class Engine implements DockerTransport {
     if(args[0]==='inspect'){
       if(args.at(-1)==='{{json .Config.Labels}}')return result(JSON.stringify({'arenacore.deadline':'1'}));
       const options=this.containers.get(args[1]!)!;const memory=Number(options[options.indexOf('--memory')+1]!.slice(0,-1))*1024*1024;
-      return result(JSON.stringify({Config:{User:'10001:10001'},Mounts:[],HostConfig:{Runtime:this.unsafe?'runc':'runsc',NetworkMode:'none',ReadonlyRootfs:true,Privileged:false,Memory:memory,MemorySwap:memory,NanoCpus:1e9,PidsLimit:64,CapDrop:['ALL'],SecurityOpt:['no-new-privileges'],Binds:null}}));
+      return result(JSON.stringify({Config:{User:'10001:10001'},Mounts:[],HostConfig:{Runtime:this.unsafe?'runc':'runsc',NetworkMode:'none',ReadonlyRootfs:true,Privileged:false,Memory:memory,MemorySwap:memory,NanoCpus:1e9,PidsLimit:64,CapDrop:['ALL'],SecurityOpt:['no-new-privileges'],Binds:null,Ulimits:[{Name:'nproc',Hard:64,Soft:64}]}}));
     }
     if(args[0]==='rm'){if(!this.cleanupFails)this.containers.delete(args.at(-1)!);return result();}
     if(args[0]==='ps')return result([...this.containers.keys()].join('\n'));
-    if(args[0]==='exec'&&args.includes('/bin/tar'))return result();
+    if(args[0]==='exec'&&args.includes('/bin/tar'))return args.includes('-c')?{stdout:this.artifact??Buffer.alloc(0),stderr:Buffer.alloc(0),exitCode:0}:result();
     if(args[0]==='exec'){this.onExec?.();if(this.execError)throw this.execError;return result('5\n');}
     if(args[0]==='cp'&&args.at(-1)==='-')return {stdout:this.artifact!,stderr:Buffer.alloc(0),exitCode:0};
     return result();
@@ -42,8 +42,9 @@ describe('isolated runner policy and supervisor failure boundaries',()=>{
   it('creates no resources for an already cancelled request',async()=>{const {engine,supervisor}=await ready();const abort=new AbortController();abort.abort();await expect(supervisor.execute(request(),abort.signal)).rejects.toThrow('ABORTED');expect(engine.calls.some(a=>a[0]==='create')).toBe(false);});
   it('cleans after abort during command execution',async()=>{const {engine,supervisor}=await ready();const abort=new AbortController();engine.onExec=()=>abort.abort();engine.execError=new DockerError('ABORTED');await expect(supervisor.execute(request(),abort.signal)).rejects.toThrow('ABORTED');expect(engine.containers.size).toBe(0);});
   it('rejects intake once shutdown starts',async()=>{const {supervisor}=await ready();supervisor.stopAccepting();await expect(supervisor.execute(request(),new AbortController().signal)).rejects.toThrow('RUNNER_NOT_READY');});
-  it('generates hardened policies without source in command arguments',()=>{const r=request();const args=containerArgs(`ac-${randomUUID()}`,manifest.python,128,{executionId:r.executionId,attempt:1,deadline:Date.now()+30000});expect(args).toContain('--runtime=runsc');expect(args).toContain('--network=none');expect(args).toContain('--pull=never');expect(args.join(' ')).not.toContain(r.sourceCode);expect(args.some(a=>a.startsWith('--volume')||a.startsWith('--privileged'))).toBe(false);});
+  it('generates hardened policies without source in command arguments',()=>{const r=request();const args=containerArgs(`ac-${randomUUID()}`,manifest.python,128,{executionId:r.executionId,attempt:1,deadline:Date.now()+30000});expect(args).toContain('--runtime=runsc');expect(args).toContain('--network=none');expect(args).toContain('--pull=never');expect(args).toContain(`nproc=${CAPS.pids}:${CAPS.pids}`);expect(args.join(' ')).not.toContain(r.sourceCode);expect(args.some(a=>a.startsWith('--volume')||a.startsWith('--privileged'))).toBe(false);});
   it('streams source into writable tmpfs without docker cp or argv exposure',async()=>{const {engine,supervisor}=await ready();await supervisor.execute(request(),new AbortController().signal);const transfer=engine.calls.find(a=>a[0]==='exec'&&a.includes('/bin/tar'))!;expect(transfer).toEqual(['exec','--interactive',expect.stringMatching(/^ac-/),'/bin/tar','-x','-f','-','-C','/work']);expect(engine.calls.some(a=>a[0]==='cp')).toBe(false);expect(transfer.join(' ')).not.toContain(request().sourceCode);});
+  it('streams normalized Java classes out without docker cp',async()=>{const {engine,supervisor}=await ready();engine.artifact=await packFiles([{name:'Solution.class',data:Buffer.from('class')}]);const r={...request(),language:'java' as const,sourceCode:'public class Solution {}'};await supervisor.execute(r,new AbortController().signal);expect(engine.calls).toContainEqual(['exec',expect.stringMatching(/^ac-/),'/bin/tar','-c','-f','-','-C','/work/classes','.']);expect(engine.calls.some(a=>a[0]==='cp')).toBe(false);});
   it('uses Ubuntu Docker path and rejects unsafe transport paths',()=>{expect(DEFAULT_DOCKER_BINARY).toBe('/usr/bin/docker');expect(()=>new DockerCli('docker')).toThrow();});
 });
 async function archive(name:string,type:'file'|'symlink',linkname?:string) {

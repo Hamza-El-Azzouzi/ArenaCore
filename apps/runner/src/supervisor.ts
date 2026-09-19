@@ -53,8 +53,9 @@ export class SandboxSupervisor {
   }
   private async verifyContainer(name:string,memoryMiB:number) {
     const result=await this.docker.command(['inspect',name,'--format','{{json .}}']);
-    const data=z.object({Config:z.object({User:z.literal('10001:10001')}),Mounts:z.array(z.unknown()).max(0),HostConfig:z.object({Runtime:z.literal('runsc'),NetworkMode:z.literal('none'),ReadonlyRootfs:z.literal(true),Privileged:z.literal(false),Memory:z.literal(memoryMiB*1024*1024),MemorySwap:z.literal(memoryMiB*1024*1024),NanoCpus:z.literal(1000000000),PidsLimit:z.literal(CAPS.pids),CapDrop:z.array(z.string()),SecurityOpt:z.array(z.string()),Binds:z.null()})}).parse(JSON.parse(result.stdout.toString()));
-    if(!data.HostConfig.CapDrop.includes('ALL') || !data.HostConfig.SecurityOpt.some(v=>v.startsWith('no-new-privileges')))throw new Error('SANDBOX_POLICY_MISMATCH');
+    const data=z.object({Config:z.object({User:z.literal('10001:10001')}),Mounts:z.array(z.unknown()).max(0),HostConfig:z.object({Runtime:z.literal('runsc'),NetworkMode:z.literal('none'),ReadonlyRootfs:z.literal(true),Privileged:z.literal(false),Memory:z.literal(memoryMiB*1024*1024),MemorySwap:z.literal(memoryMiB*1024*1024),NanoCpus:z.literal(1000000000),PidsLimit:z.literal(CAPS.pids),CapDrop:z.array(z.string()),SecurityOpt:z.array(z.string()),Binds:z.null(),Ulimits:z.array(z.object({Name:z.string(),Hard:z.number(),Soft:z.number()}))})}).parse(JSON.parse(result.stdout.toString()));
+    const nproc=data.HostConfig.Ulimits.find(v=>v.Name==='nproc');
+    if(!data.HostConfig.CapDrop.includes('ALL') || !data.HostConfig.SecurityOpt.some(v=>v.startsWith('no-new-privileges')) || nproc?.Hard!==CAPS.pids || nproc.Soft!==CAPS.pids)throw new Error('SANDBOX_POLICY_MISMATCH');
   }
   async execute(input:unknown,signal:AbortSignal):Promise<ExecutionObservation> {
     const request=sandboxRequestSchema.parse(input);
@@ -72,7 +73,7 @@ export class SandboxSupervisor {
           await this.docker.command(['exec',name,'/bin/mkdir','/work/classes'],{signal:abort.signal});
           const result=await this.docker.command(['exec',name,'/opt/java/openjdk/bin/javac','-J-Xmx256m','-proc:none','-encoding','UTF-8','-d','/work/classes','/work/Solution.java'],{signal:abort.signal,timeoutMs:Math.min(CAPS.compileMs,deadline-Date.now()),maxBytes:budget,allowFailure:true});
           budget-=result.stdout.length+result.stderr.length;observation.compilation={ok:result.exitCode===0,stdout:result.stdout.toString(),stderr:result.stderr.toString()};
-          if(result.exitCode===0)archive=await normalizeJavaArtifacts((await this.docker.command(['cp',`${name}:/work/classes/.`,'-'],{signal:abort.signal,maxBytes:CAPS.artifactBytes})).stdout);
+          if(result.exitCode===0)archive=await normalizeJavaArtifacts((await this.docker.command(['exec',name,'/bin/tar','-c','-f','-','-C','/work/classes','.'],{signal:abort.signal,maxBytes:CAPS.artifactBytes})).stdout);
         });
         if(!observation.compilation?.ok)return observation;
       }
