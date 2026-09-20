@@ -59,6 +59,11 @@ export class SandboxSupervisor {
     const nproc=data.HostConfig.Ulimits.find(v=>v.Name==='nproc');
     if(!data.HostConfig.CapDrop.includes('ALL') || !data.HostConfig.SecurityOpt.some(v=>v.startsWith('no-new-privileges')) || nproc?.Hard!==CAPS.pids || nproc.Soft!==CAPS.pids)throw new Error('SANDBOX_POLICY_MISMATCH');
   }
+  private async terminalOom(name:string) {
+    const result=await this.docker.command(['inspect',name,'--format','{{json .State}}']);
+    const parsed=z.object({OOMKilled:z.boolean(),Running:z.boolean(),Pid:z.number().int().nonnegative()}).safeParse(JSON.parse(result.stdout.toString()));
+    return parsed.success&&parsed.data.OOMKilled&&!parsed.data.Running&&parsed.data.Pid===0;
+  }
   async execute(input:unknown,signal:AbortSignal):Promise<ExecutionObservation> {
     const request=sandboxRequestSchema.parse(input);
     if(!this.ready || this.shuttingDown)throw new Error('RUNNER_NOT_READY');
@@ -87,8 +92,13 @@ export class SandboxSupervisor {
           try {
             const before=await this.metrics.snapshot(name);
             const result=await this.docker.command(['exec','--interactive',name,...profiles[request.language].command],{input:Buffer.from(test.input),signal:abort.signal,timeoutMs:Math.max(1,Math.min(request.timeMs,deadline-Date.now())),maxBytes:budget,allowFailure:true});
-            const measured=metricDelta(before,await this.metrics.snapshot(name));
             budget-=result.stdout.length+result.stderr.length;
+            let measured;
+            try {measured=metricDelta(before,await this.metrics.snapshot(name));}
+            catch(e) {
+              if(await this.terminalOom(name)){observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started,failure:'MEMORY_LIMIT_EXCEEDED'});return;}
+              throw e;
+            }
             observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started,cpuMs:measured.cpuMs,memoryKiB:measured.memoryKiB,...(measured.oomKilled?{failure:'MEMORY_LIMIT_EXCEEDED' as const}:{})});
           } catch(e) {
             if(e instanceof DockerError && (e.code==='COMMAND_TIMEOUT'||e.code==='OUTPUT_LIMIT')) {observation.cases.push({caseId:test.id,stdout:'',stderr:'',failure:e.code==='COMMAND_TIMEOUT'?'TIME_LIMIT_EXCEEDED':'OUTPUT_LIMIT_EXCEEDED',wallMs:Date.now()-started});budget=e.code==='OUTPUT_LIMIT'?0:budget;}

@@ -9,7 +9,7 @@ function assertMeasured(observation:ExecutionObservation,expectedOutput:string) 
 
 function assertOom(observation:ExecutionObservation) {
   const measured=observation.cases[0];
-  if(observation.cases.length!==1||measured?.failure!=='MEMORY_LIMIT_EXCEEDED'||typeof measured.cpuMs!=='number'||!Number.isInteger(measured.cpuMs)||typeof measured.memoryKiB!=='number'||!Number.isInteger(measured.memoryKiB)||measured.memoryKiB<=0||measured.memoryKiB>64*1024)throw new Error('OOM_CASE_INVALID');
+  if(observation.cases.length!==1||measured?.failure!=='MEMORY_LIMIT_EXCEEDED'||measured.stdout.includes('LEAK')||((measured.cpuMs===undefined)!==(measured.memoryKiB===undefined))||(measured.cpuMs!==undefined&&(!Number.isInteger(measured.cpuMs)||!Number.isInteger(measured.memoryKiB)||measured.memoryKiB!<=0||measured.memoryKiB!>64*1024)))throw new Error('OOM_CASE_INVALID');
 }
 
 async function main() {
