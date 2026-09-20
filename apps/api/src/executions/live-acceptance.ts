@@ -3,6 +3,7 @@ import { Queue } from 'bullmq';
 import { Config } from '../config/config';
 import { Database } from '../database/database';
 import { redisOptions } from './queue';
+import { sampleVersionId } from '../database/sample-seed';
 
 type Language='python'|'javascript'|'java';
 type Mode='RUN'|'SUBMIT';
@@ -39,7 +40,7 @@ async function main(){
     console.log(`LIVE_JUDGING_IDLE_COUNTS database=${unfinished} waiting=${waiting} active=${active} delayed=${delayed} prioritized=${prioritized}`);
     if(unfinished||waiting||active||delayed||prioritized)throw new Error('ACCEPTANCE_REQUIRES_IDLE_SYSTEM');
     stage='FIXTURE_VALIDATION';
-    const version=await db.problemVersion.findFirst({where:{published:true,problem:{slug:'sum-two-numbers'}},select:{id:true,testCases:{orderBy:{ordinal:'asc'},select:{id:true,visibility:true,input:true,expectedOutput:true}}}});
+    const version=await db.problemVersion.findFirst({where:{id:sampleVersionId,published:true,problem:{id:'00000000-0000-4000-8000-000000000001',slug:'sum-two-numbers'}},select:{id:true,testCases:{orderBy:{ordinal:'asc'},select:{id:true,visibility:true,input:true,expectedOutput:true}}}});
     if(!version||version.testCases.filter(test=>test.visibility==='PUBLIC').length!==2||version.testCases.filter(test=>test.visibility==='HIDDEN').length!==1)throw new Error('ACCEPTANCE_FIXTURE_UNAVAILABLE');
 
     stage='FIXTURE_CREATION';const runId=randomUUID();

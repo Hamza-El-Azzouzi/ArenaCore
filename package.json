@@ -19,6 +19,7 @@
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:production": "node apps/api/dist/database/seed-main.js",
     "check": "npm run db:validate && npm run typecheck && vitest run",
     "runner:preflight": "node apps/runner/dist/preflight.js",
     "runner:supervisor": "node apps/runner/dist/main.js",

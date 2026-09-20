@@ -3,10 +3,15 @@
 Every push to `main` runs the database, Redis, type, test and dependency checks in
 `.github/workflows/backend.yml`. Only the exact commit that passes those checks is
 packaged and sent over authenticated SSH. Application deployment builds an ARM64 API
-image from a pinned Node base, applies forward migrations, switches the `current`
-symlink and replaces the API container. A failed build or migration leaves the prior
+image from a pinned Node base, applies forward migrations, verifies or creates the
+immutable sample problem, switches the `current` symlink and replaces the API container. A failed build, migration or seed leaves the prior
 release active. A failed readiness check restores the previous image when one exists;
 migrations still require backward-compatible releases because database rollback is not automatic.
+
+The production seed is compiled into the API image and does not depend on development
+tools. It is transactional and repeatable. If `sum-two-numbers` already exists, its
+fixed IDs, published version, limits, comparator and three cases must exactly match;
+deployment fails instead of modifying or silently accepting conflicting published data.
 
 The frontend is deployed independently by Vercel. `PUBLIC_ORIGIN` identifies that exact
 browser origin; `API_ORIGIN` identifies the Caddy endpoint. Credentialed CORS, CSRF and

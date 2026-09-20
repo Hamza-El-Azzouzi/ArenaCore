@@ -47,6 +47,7 @@ if [[ "$role" == "application" ]]; then
   previous_image="$(sudo docker inspect --format '{{.Config.Image}}' arenacore-api 2>/dev/null || true)"
   previous_release="$(readlink -f "$root/current" 2>/dev/null || true)"
   sudo env "ARENACORE_API_IMAGE=$image" docker compose --env-file /etc/arenacore/compose.env -p arenacore -f "$release/infra/deploy/compose.application.yml" run --rm --no-deps api npm run db:migrate
+  sudo env "ARENACORE_API_IMAGE=$image" docker compose --env-file /etc/arenacore/compose.env -p arenacore -f "$release/infra/deploy/compose.application.yml" run --rm --no-deps api npm run db:seed:production
   sudo ln -sfn "$release" "$root/current"
   sudo env "ARENACORE_API_IMAGE=$image" docker compose --env-file /etc/arenacore/compose.env -p arenacore -f "$release/infra/deploy/compose.application.yml" up -d redis api
   healthy=false
