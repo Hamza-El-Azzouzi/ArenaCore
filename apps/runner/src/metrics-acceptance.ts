@@ -17,11 +17,16 @@ async function main() {
   const socket=process.env.RUNNER_SOCKET_PATH;
   if(!socket?.startsWith('/'))throw new Error('SOCKET_REQUIRED');
   const client=new SupervisorClient(socket);
+  stage='MEASURED_EXECUTION';
   const measured=await client.execute({executionId:randomUUID(),attempt:1,language:'python',sourceCode:"x=bytearray(32*1024*1024)\ns=sum(range(3000000))\nprint('MEASURED')",cases:[{id:randomUUID(),input:''}],timeMs:5000,memoryMiB:128},new AbortController().signal);
+  stage='MEASURED_ASSERTION';
   assertMeasured(measured,'MEASURED\n');
+  stage='OOM_EXECUTION';
   const oom=await client.execute({executionId:randomUUID(),attempt:1,language:'python',sourceCode:"x=bytearray(512*1024*1024)\nprint('LEAK')",cases:[{id:randomUUID(),input:''}],timeMs:5000,memoryMiB:64},new AbortController().signal);
+  stage='OOM_ASSERTION';
   assertOom(oom);
   console.log('RUNNER_METRICS_ACCEPTANCE_PASSED');
 }
 
-void main().catch(()=>{console.error('RUNNER_METRICS_ACCEPTANCE_FAILED');process.exitCode=1;});
+let stage='STARTUP';
+void main().catch(()=>{console.error(`RUNNER_METRICS_ACCEPTANCE_FAILED ${stage}`);process.exitCode=1;});

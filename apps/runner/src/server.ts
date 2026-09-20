@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { sandboxRequestSchema } from '@arenacore/runtime-policy';
 import { DockerError } from './transport';
 import { SandboxCleanupError } from '@arenacore/contracts';
+import { METRIC_ERROR_CODES } from './metrics';
 
 export async function listenSupervisor(supervisor:Pick<SandboxSupervisor,'execute'|'stopAccepting'|'reapExpired'>,socketPath:string) {
   if(!socketPath.startsWith('/')||socketPath.includes('\0'))throw new Error('INVALID_SUPERVISOR_SOCKET');
@@ -31,6 +32,7 @@ export async function listenSupervisor(supervisor:Pick<SandboxSupervisor,'execut
       controllers.set(key,abort);
       const result=await supervisor.execute(execution,abort.signal);reply(res,200,{...result,...(abort.signal.aborted?{cancellationConfirmed:true}:{})});
     } catch(e) {
+      if(e instanceof Error&&METRIC_ERROR_CODES.has(e.message))console.error(`RUNNER_METRICS_FAILED ${e.message}`);
       if(e instanceof DockerError && e.code==='ABORTED' && abort.signal.aborted)reply(res,200,{cases:[],cancellationConfirmed:true});
       else reply(res,503,{error:{code:e instanceof SandboxCleanupError?'SANDBOX_CLEANUP_UNCONFIRMED':'EXECUTION_UNAVAILABLE'}});
     } finally {if(key)controllers.delete(key);admitted--;}

@@ -17,10 +17,15 @@ if [[ -n "$(docker ps --all --quiet --filter label=arenacore.managed=true)" ]]; 
   exit 1
 fi
 
-sudo -u arenacore-worker env \
+if ! sudo -u arenacore-worker env \
   RUNNER_METRICS_ACCEPTANCE=true \
   RUNNER_SOCKET_PATH=/run/arenacore/supervisor.sock \
-  /usr/bin/node /opt/arenacore/current/apps/runner/dist/metrics-acceptance.js
+  /usr/bin/node /opt/arenacore/current/apps/runner/dist/metrics-acceptance.js; then
+  journalctl -u arenacore-supervisor.service --since '-2 minutes' --no-pager \
+    | grep 'RUNNER_METRICS_FAILED' \
+    | tail -n 1 || true
+  exit 1
+fi
 
 if [[ -n "$(docker ps --all --quiet --filter label=arenacore.managed=true)" ]]; then
   echo "RUNNER_METRICS_VERIFY_ORPHAN_REMAINED" >&2

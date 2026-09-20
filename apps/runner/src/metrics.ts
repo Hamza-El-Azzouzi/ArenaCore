@@ -4,6 +4,7 @@ import { DockerTransport } from './transport';
 
 export interface CgroupSnapshot {path:string;cpuUsec:number;memoryPeakBytes:number;oomKills:number}
 export interface MetricsReader {snapshot(container:string):Promise<CgroupSnapshot>}
+export const METRIC_ERROR_CODES=new Set(['INVALID_CGROUP_PID','INVALID_CGROUP_COUNTER','UNIFIED_CGROUP_REQUIRED','SCOPED_CGROUP_REQUIRED','INVALID_CGROUP_PATH','INVALID_CGROUP_COUNTERS','CGROUP_FILES_UNAVAILABLE','CGROUP_METRICS_MISSING','INVALID_CGROUP_MEMORY_PEAK','CGROUP_IDENTITY_CHANGED','CGROUP_COUNTER_REGRESSION']);
 
 function integer(value:string,name:string) {
   if(!/^[0-9]+$/.test(value))throw new Error(`INVALID_CGROUP_${name}`);
@@ -37,14 +38,19 @@ export class CgroupV2Metrics implements MetricsReader {
     const pidResult=await this.docker.command(['inspect',container,'--format','{{.State.Pid}}']);
     const pid=integer(pidResult.stdout.toString().trim(),'PID');
     if(pid<2)throw new Error('INVALID_CGROUP_PID');
-    const relative=unifiedCgroupPath(await readFile(`${this.proc}/${pid}/cgroup`,'utf8'));
+    let membership:string;
+    try {membership=await readFile(`${this.proc}/${pid}/cgroup`,'utf8');} catch {throw new Error('CGROUP_FILES_UNAVAILABLE');}
+    const relative=unifiedCgroupPath(membership);
     const directory=resolve(this.root,`.${relative}`),root=resolve(this.root);
     if(!directory.startsWith(`${root}${sep}`))throw new Error('INVALID_CGROUP_PATH');
-    const [cpuText,peakText,eventText]=await Promise.all([
-      readFile(`${directory}/cpu.stat`,'utf8'),
-      readFile(`${directory}/memory.peak`,'utf8'),
-      readFile(`${directory}/memory.events`,'utf8'),
-    ]);
+    let cpuText:string,peakText:string,eventText:string;
+    try {
+      [cpuText,peakText,eventText]=await Promise.all([
+        readFile(`${directory}/cpu.stat`,'utf8'),
+        readFile(`${directory}/memory.peak`,'utf8'),
+        readFile(`${directory}/memory.events`,'utf8'),
+      ]);
+    } catch {throw new Error('CGROUP_FILES_UNAVAILABLE');}
     const cpu=keyedCounters(cpuText),events=keyedCounters(eventText);
     const cpuUsec=cpu.get('usage_usec'),oomKills=events.get('oom_kill');
     if(cpuUsec===undefined||oomKills===undefined)throw new Error('CGROUP_METRICS_MISSING');
