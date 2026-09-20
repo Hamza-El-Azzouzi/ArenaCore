@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor service lifecycle drill also passed. Abrupt-death recovery, trusted-worker integration, measured metrics and independent review remain launch gates. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle drill and restricted worker dependency check also passed. Abrupt-death recovery, controlled live judging, measured metrics and independent review remain launch gates. Do not enable public execution from this guide alone.
 
 ## Host boundary
 

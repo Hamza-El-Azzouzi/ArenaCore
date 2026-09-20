@@ -2,7 +2,7 @@
 
 Judging is implemented in `packages/judge`; the separate runner adapter is `apps/runner/src/judging-backend.ts`. A prepared queue-worker entrypoint is `apps/api/src/executions/worker-main.ts`. It runs as a separate process on the dedicated runner host, never from HTTP bootstrap. Sharing the built API artifact reuses its tested job store/lease protocol without giving the HTTP process a Docker socket.
 
-The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite and idle supervisor/janitor lifecycle drill pass; abrupt-death recovery, live judging and trusted metric collection are still pending. No source is executed by judging fixtures, and this milestone does not clear public launch gates.
+The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill and restricted worker dependency check pass; abrupt-death recovery, live judging and trusted metric collection are still pending. No source is executed by judging fixtures, and this milestone does not clear public launch gates.
 
 ## Exact data flow
 
@@ -40,7 +40,6 @@ Create a separate PostgreSQL login for the worker. It needs to read immutable pl
 CREATE ROLE arenacore_worker LOGIN PASSWORD 'REPLACE_WITH_RANDOM_PASSWORD';
 GRANT CONNECT ON DATABASE arenacore TO arenacore_worker;
 GRANT USAGE ON SCHEMA public TO arenacore_worker;
-GRANT USAGE ON ALL TYPES IN SCHEMA public TO arenacore_worker;
 GRANT SELECT, UPDATE ON TABLE "Execution" TO arenacore_worker;
 GRANT SELECT, INSERT, DELETE ON TABLE "ExecutionEvent" TO arenacore_worker;
 GRANT SELECT ON TABLE "ProblemVersion", "TestCase" TO arenacore_worker;
@@ -62,6 +61,8 @@ sudo bash infra/runner/verify-worker.sh
 ```
 
 The check unit runs with the same identity, filesystem restrictions and network allowlist as the real worker. It connects to PostgreSQL and Redis and reaches the Unix supervisor, but it never creates a BullMQ consumer and cannot claim an execution. Success prints `WORKER_INSTALLATION_CHECK_PASSED`; the real worker remains stopped and disabled.
+
+The dedicated runner produced that success code with the separate `arenacore_worker` database login and private application address. This proves installation-time reachability and configured grants. It does not replace the next controlled end-to-end judging test.
 
 Startup failures log only a safe stage code: `CONFIGURATION`, `DATABASE_CONNECTION`, `DATABASE_PRIVILEGES`, `REDIS_CONNECTION`, `SUPERVISOR_CONNECTION`, or `WORKER_INITIALIZATION`. They never include a URL, password, database error, submitted source or hidden test data.
 
