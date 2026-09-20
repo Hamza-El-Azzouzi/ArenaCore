@@ -16,6 +16,10 @@ container_id=''
 supervisor_disrupted=false
 request_started_ms=''
 
+now_ms() {
+  /usr/bin/node -e 'process.stdout.write(String(Date.now()))'
+}
+
 restore() {
   local exit_code=$?
   if [[ -n "$curl_pid" ]]; then
@@ -51,6 +55,12 @@ if [[ "$(systemctl show arenacore-supervisor.service --property=Restart --value)
   echo "RUNNER_CRASH_VERIFY_RESTART_POLICY" >&2
   exit 1
 fi
+active_release="$(readlink -f /opt/arenacore/current)"
+main_pid="$(systemctl show arenacore-supervisor.service --property=MainPID --value)"
+if [[ ! "$main_pid" =~ ^[1-9][0-9]+$ ]] || [[ "$(readlink -f "/proc/${main_pid}/cwd")" != "$active_release" ]]; then
+  echo "RUNNER_CRASH_VERIFY_RELEASE_MISMATCH" >&2
+  exit 1
+fi
 if [[ -n "$(docker ps --all --quiet --filter label=arenacore.managed=true)" ]]; then
   echo "RUNNER_CRASH_VERIFY_BUSY" >&2
   exit 1
@@ -61,7 +71,7 @@ chown root:arenacore-runner "$request_file"
 chmod 0640 "$request_file"
 
 policy_total_ms="$(/usr/bin/node -e "const {CAPS}=require('/opt/arenacore/current/packages/runtime-policy/dist/index.js');if(!Number.isSafeInteger(CAPS.totalMs)||CAPS.totalMs<1000||CAPS.totalMs>300000)process.exit(1);process.stdout.write(String(CAPS.totalMs))")"
-request_started_ms="$(date +%s%3N)"
+request_started_ms="$(now_ms)"
 sudo -u arenacore-worker /usr/bin/curl \
   --silent --show-error --max-time 45 \
   --unix-socket "$socket" \
@@ -84,11 +94,6 @@ if [[ "$(docker inspect --format '{{.HostConfig.Runtime}}:{{.State.Running}}' "$
   exit 1
 fi
 
-main_pid="$(systemctl show arenacore-supervisor.service --property=MainPID --value)"
-if [[ ! "$main_pid" =~ ^[1-9][0-9]+$ ]]; then
-  echo "RUNNER_CRASH_VERIFY_MAIN_PID" >&2
-  exit 1
-fi
 supervisor_disrupted=true
 systemctl kill --kill-who=main --signal=SIGKILL arenacore-supervisor.service
 for _ in $(seq 1 50); do
@@ -110,16 +115,17 @@ if ! docker inspect "$container_id" >/dev/null 2>&1; then
 fi
 
 deadline="$(docker inspect --format '{{index .Config.Labels "arenacore.deadline"}}' "$container_id")"
-now_ms="$(date +%s%3N)"
+observed_ms="$(now_ms)"
 if [[ ! "$deadline" =~ ^[0-9]+$ ]]; then
   echo "RUNNER_CRASH_VERIFY_DEADLINE_FORMAT" >&2
   exit 1
 fi
-if (( deadline <= request_started_ms || deadline > request_started_ms + policy_total_ms + 5000 )); then
-  echo "RUNNER_CRASH_VERIFY_DEADLINE_BOUND" >&2
+deadline_offset_ms=$(( deadline - request_started_ms ))
+if (( deadline_offset_ms <= 0 || deadline_offset_ms > policy_total_ms + 5000 )); then
+  echo "RUNNER_CRASH_VERIFY_DEADLINE_BOUND offset_ms=${deadline_offset_ms} policy_ms=${policy_total_ms}" >&2
   exit 1
 fi
-remaining_ms=$(( deadline - now_ms ))
+remaining_ms=$(( deadline - observed_ms ))
 if (( remaining_ms > 0 )); then
   wait_seconds=$(( (remaining_ms + 999) / 1000 + 1 ))
   sleep "$wait_seconds"
