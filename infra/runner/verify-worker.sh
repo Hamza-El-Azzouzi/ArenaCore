@@ -42,7 +42,11 @@ for unit in arenacore-worker.service arenacore-worker-check.service; do
   fi
 done
 
-systemctl reset-failed arenacore-worker-check.service
+# A newly installed static oneshot may have no manager state to reset yet.
+# Only a previously failed invocation needs reset-failed.
+if [[ "$(systemctl show arenacore-worker-check.service --property=ActiveState --value)" == "failed" ]]; then
+  systemctl reset-failed arenacore-worker-check.service
+fi
 systemctl start arenacore-worker-check.service
 if [[ "$(systemctl show arenacore-worker-check.service --property=Result --value)" != "success" ]]; then
   echo "WORKER_DEPENDENCY_CHECK_FAILED" >&2
