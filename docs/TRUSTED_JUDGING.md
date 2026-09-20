@@ -79,6 +79,47 @@ Inject private credentials through systemd's root-only environment file. This en
 
 Do not enable API creation yet. The production worker entrypoint is available for the controlled live-judging gate, but the installed unit remains disabled until that gate, abrupt-death recovery and resource evidence pass.
 
+## Controlled live-judging gate
+
+This gate exercises the deployed PostgreSQL, Redis, restricted worker, private Unix RPC, supervisor, Docker, gVisor and all three pinned runtime images. It bypasses browser authentication and the transactional dispatcher, which already have separate integration coverage. The operator command refuses to run unless `NODE_ENV=production`, `EXECUTIONS_ENABLED=false`, `PIPELINE_ENABLED=false`, Redis is configured, the database has no unfinished execution, and the queue has no waiting, active, delayed or prioritized job.
+
+After deploying the commit, first confirm on the runner that the worker is disabled and no sandbox exists:
+
+```sh
+sudo systemctl is-enabled arenacore-worker.service || true
+sudo systemctl is-active arenacore-worker.service || true
+sudo docker ps --all --quiet --filter label=arenacore.managed=true
+```
+
+The expected service results are `disabled` and `inactive`, and the Docker command prints nothing. Start the worker without enabling it:
+
+```sh
+sudo systemctl start arenacore-worker.service
+sudo journalctl -u arenacore-worker.service --since '-1 minute' --no-pager \
+  | grep JUDGING_WORKER_STARTED
+```
+
+In a second terminal on the application VM, run the acceptance command inside the deployed API container:
+
+```sh
+sudo docker exec \
+  -e LIVE_JUDGING_ACCEPTANCE=true \
+  arenacore-api npm run acceptance:live-judging
+```
+
+It creates seven controlled executions: correct Run and Submit jobs for Python, JavaScript and Java, plus a wrong Submit that generates hidden output internally. It requires every correct job to finish `ACCEPTED`, the wrong job to finish `WRONG_ANSWER`, every attempt to be fenced and terminal, Run results to contain only public case IDs, and Submit events/results to contain no console output or hidden input/answer sentinel. It waits for BullMQ jobs to leave the active state, removes only its own queue jobs and database fixtures, and prints `LIVE_JUDGING_ACCEPTANCE_PASSED`.
+
+Immediately stop the worker on the runner whether the application command passes or fails:
+
+```sh
+sudo systemctl stop arenacore-worker.service
+sudo systemctl is-active arenacore-worker.service || true
+sudo systemctl is-enabled arenacore-worker.service || true
+sudo docker ps --all --quiet --filter label=arenacore.managed=true
+```
+
+The final expected state is `inactive`, `disabled`, and no managed container. A failure prints only its safe stage. Keep execution disabled, preserve the database rows after a result-verification failure for investigation, and inspect the worker/supervisor journals without printing credentials or source.
+
 ## Verification
 
 Unit tests exercise comparison/classification, all language observation shapes, private projections, protocol rejection, cancellation, missing metrics, output limits, pinned plan loading and worker activation gates. Real PostgreSQL/Redis/BullMQ integration tests run the actual judging backend with controlled observation fixtures: a hidden Submit prints sentinel diagnostics but publishes only WRONG_ANSWER; a correct public Run stores only public case results.

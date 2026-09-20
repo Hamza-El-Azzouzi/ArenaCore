@@ -99,3 +99,5 @@ sudo bash infra/runner/verify-services.sh
 It refuses to continue if any ArenaCore-managed sandbox exists. It verifies the systemd hardening properties, gracefully restarts the supervisor, checks the private socket through the supervisor identity, creates a stopped expired gVisor sandbox, and requires the independent janitor to remove it. Success prints `RUNNER_SERVICE_LIFECYCLE_PASSED`.
 
 That lifecycle verifier passed on the dedicated host. Continue with the worker setup in [the trusted judging guide](../../docs/TRUSTED_JUDGING.md). Do not enable the worker or API execution yet.
+
+The restricted dependency verifier also passed. Follow the guide's controlled live-judging gate next: start the worker without enabling it, run the operator-only acceptance command on the application host, then stop the worker and prove no managed sandbox remains.

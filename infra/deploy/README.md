@@ -131,7 +131,9 @@ sudo bash infra/runner/verify-worker.sh
 ```
 
 Keep `arenacore-worker.service` stopped and disabled after this check. The live-judging
-gate will activate it under controlled test data later.
+gate activates it without enabling it, runs seven controlled jobs from the application
+container, then stops it. Follow `docs/TRUSTED_JUDGING.md`; do not turn on public API
+execution as part of that gate.
 
 For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,

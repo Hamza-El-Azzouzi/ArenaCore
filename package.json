@@ -23,7 +23,8 @@
     "runner:preflight": "node apps/runner/dist/preflight.js",
     "runner:supervisor": "node apps/runner/dist/main.js",
     "runner:janitor": "node apps/runner/dist/main.js --janitor",
-    "runner:worker": "node apps/api/dist/executions/worker-main.js"
+    "runner:worker": "node apps/api/dist/executions/worker-main.js",
+    "acceptance:live-judging": "node apps/api/dist/executions/live-acceptance.js"
   },
   "dependencies": {
     "@prisma/client": "6.19.0",
