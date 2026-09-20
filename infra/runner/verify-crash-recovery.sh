@@ -14,6 +14,7 @@ response_file="/run/arenacore-crash-${execution_id}.response"
 curl_pid=''
 container_id=''
 supervisor_disrupted=false
+request_started_ms=''
 
 restore() {
   local exit_code=$?
@@ -59,6 +60,8 @@ fi
 chown root:arenacore-runner "$request_file"
 chmod 0640 "$request_file"
 
+policy_total_ms="$(/usr/bin/node -e "const {CAPS}=require('/opt/arenacore/current/packages/runtime-policy/dist/index.js');if(!Number.isSafeInteger(CAPS.totalMs)||CAPS.totalMs<1000||CAPS.totalMs>300000)process.exit(1);process.stdout.write(String(CAPS.totalMs))")"
+request_started_ms="$(date +%s%3N)"
 sudo -u arenacore-worker /usr/bin/curl \
   --silent --show-error --max-time 45 \
   --unix-socket "$socket" \
@@ -108,12 +111,19 @@ fi
 
 deadline="$(docker inspect --format '{{index .Config.Labels "arenacore.deadline"}}' "$container_id")"
 now_ms="$(date +%s%3N)"
-if [[ ! "$deadline" =~ ^[0-9]{13}$ ]] || (( deadline <= now_ms || deadline - now_ms > 35000 )); then
-  echo "RUNNER_CRASH_VERIFY_DEADLINE" >&2
+if [[ ! "$deadline" =~ ^[0-9]+$ ]]; then
+  echo "RUNNER_CRASH_VERIFY_DEADLINE_FORMAT" >&2
   exit 1
 fi
-wait_seconds=$(( (deadline - now_ms + 999) / 1000 + 1 ))
-sleep "$wait_seconds"
+if (( deadline <= request_started_ms || deadline > request_started_ms + policy_total_ms + 5000 )); then
+  echo "RUNNER_CRASH_VERIFY_DEADLINE_BOUND" >&2
+  exit 1
+fi
+remaining_ms=$(( deadline - now_ms ))
+if (( remaining_ms > 0 )); then
+  wait_seconds=$(( (remaining_ms + 999) / 1000 + 1 ))
+  sleep "$wait_seconds"
+fi
 
 systemctl start arenacore-janitor.service
 if docker inspect "$container_id" >/dev/null 2>&1; then
