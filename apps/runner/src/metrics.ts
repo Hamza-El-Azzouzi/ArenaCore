@@ -24,7 +24,7 @@ export function unifiedCgroupPath(value:string) {
 export function keyedCounters(value:string) {
   const result=new Map<string,number>();
   for(const line of value.trim().split('\n')) {
-    const match=/^([a-z_]+) ([0-9]+)$/.exec(line);
+    const match=/^([a-z0-9_.-]+) ([0-9]+)$/.exec(line);
     if(!match||result.has(match[1]!))throw new Error('INVALID_CGROUP_COUNTERS');
     result.set(match[1]!,integer(match[2]!,'COUNTER'));
   }
