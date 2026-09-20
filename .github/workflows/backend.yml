@@ -123,7 +123,7 @@ jobs:
   deploy-runner:
     name: Deploy isolated runner
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_RUNNER == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production-runner
     concurrency:
