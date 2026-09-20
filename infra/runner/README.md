@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 original live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, abrupt supervisor-death, and restricted-identity cgroup metric gates also passed. The expanded metric-aware isolation suite and independent review remain launch gates. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed the expanded 15-test live gVisor suite with the pinned three-language manifest. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, abrupt supervisor-death, and restricted-identity cgroup metric gates also passed. Independent review remains a launch gate. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -58,7 +58,7 @@ node_modules/.bin/vitest run tests/runner-isolation.integration.test.ts
 
 Opting in makes missing images/runtime fail the suite; it never falls back to ordinary Docker. Standard CI skips these tests because its PostgreSQL/Redis services do not provide a dedicated gVisor runner.
 
-The current live suite covers all three languages, infinite loops, output flooding, internet/metadata blocking, root filesystem/socket access, fresh scratch between cases, memory/PID/scratch caps, credential absence, cancellation with children, and malformed compilation. All 14 tests passed on the dedicated ARM64 gVisor host using the approved digest-only manifest.
+The current live suite covers all three languages with measured metrics, infinite loops, output flooding, internet/metadata blocking, root filesystem/socket access, fresh scratch between cases, memory/PID/scratch caps, credential absence, cancellation with children, and malformed compilation. All 15 tests passed on the dedicated ARM64 gVisor host using the approved digest-only manifest.
 
 Complete the remaining acceptance drills before stage 6 is marked complete: measured memory/PID/CPU/file/scratch enforcement; fork bombs and child-process escape attempts; compiler abuse; cross-job/process visibility; no host/API/DB/Redis credentials; cancellation during creation/compile/run; worker/supervisor death; bounded external orphan cleanup; restart and drain behavior; verified runtime/image provenance; and independent security review. Add real tests for these properties, rather than checking command flags alone.
 
@@ -72,7 +72,7 @@ The execution library's `stopAccepting()` aborts active signals and rejects new 
 
 ## Launch state
 
-API production execution remains rejected and default creation remains disabled. Stage 7 will wire trusted judging/aggregate metrics and the real worker adapter after stage 6 isolation is demonstrated. Hidden expected answers must remain in the trusted judge; the supervisor request carries source and current-case input only, never expected output. Reconcile the missing earlier sandbox specification before claiming compliance with it.
+API production execution remains rejected and default creation remains disabled. Trusted judging, aggregate metrics and the real worker adapter are implemented and host-verified. Hidden expected answers remain in the trusted judge; the supervisor request carries source and current-case input only, never expected output. Complete independent review and reconcile the missing earlier sandbox specification before claiming compliance or enabling execution.
 
 ## Private supervisor service and worker client
 
@@ -137,6 +137,16 @@ RUNNER_METRICS_ACCEPTANCE_PASSED
 RUNNER_METRICS_HOST_PASSED
 ```
 
-Rerun the expanded live isolation suite as well; its three language cases now require metrics and it includes successful CPU/peak-memory and OOM-counter assertions.
+The expanded live isolation suite passed all 15 tests. Its three language cases produced metrics, and its successful CPU/peak-memory, terminal OOM, PID-cap, isolation and cleanup assertions passed.
+
+## Security posture evidence
+
+After the idle host gates pass, run the read-only verifier while the worker remains inactive and disabled:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-security-posture.sh
+```
+
+It checks service identities and groups, Docker-socket separation, manifest/socket permissions, effective systemd confinement, worker state, registered `runsc`, an empty managed-container set, digest-only local images, and nonroot image users. It prints nonsecret `runsc` and manifest fingerprints, followed by `RUNNER_SECURITY_POSTURE_PASSED`. Compare the `runsc` checksum with the approved official gVisor release; a local script cannot establish external provenance. Retain the evidence with the release commit and [security review](../../docs/security/RUNNER_SECURITY_REVIEW.md).
 
 The production host printed both metric success codes. Its OOM workload killed the complete gVisor sandbox, so the accepted evidence was Docker's persisted terminal `OOMKilled` state; PID zero prevented a final cgroup snapshot and the protocol correctly omitted fabricated metrics for that case.
