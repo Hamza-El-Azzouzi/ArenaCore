@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 original live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, and abrupt supervisor-death gates also passed. Cgroup metric collection is implemented and awaits the host gate below; independent review remains a launch gate. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 original live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, abrupt supervisor-death, and restricted-identity cgroup metric gates also passed. The expanded metric-aware isolation suite and independent review remain launch gates. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -138,3 +138,5 @@ RUNNER_METRICS_HOST_PASSED
 ```
 
 Rerun the expanded live isolation suite as well; its three language cases now require metrics and it includes successful CPU/peak-memory and OOM-counter assertions.
+
+The production host printed both metric success codes. Its OOM workload killed the complete gVisor sandbox, so the accepted evidence was Docker's persisted terminal `OOMKilled` state; PID zero prevented a final cgroup snapshot and the protocol correctly omitted fabricated metrics for that case.

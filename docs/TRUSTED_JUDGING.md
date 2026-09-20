@@ -2,7 +2,7 @@
 
 Judging is implemented in `packages/judge`; the separate runner adapter is `apps/runner/src/judging-backend.ts`. A prepared queue-worker entrypoint is `apps/api/src/executions/worker-main.ts`. It runs as a separate process on the dedicated runner host, never from HTTP bootstrap. Sharing the built API artifact reuses its tested job store/lease protocol without giving the HTTP process a Docker socket.
 
-The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check, controlled seven-job live judging gate, and abrupt supervisor-death gate pass. Trusted cgroup metric collection is implemented and awaits its host gate. This milestone does not clear public launch gates.
+The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The original dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check, controlled seven-job live judging gate, abrupt supervisor-death gate, and restricted-identity cgroup metric gate pass. The expanded metric-aware isolation suite and independent review remain. This milestone does not clear public launch gates.
 
 ## Exact data flow
 
@@ -140,7 +140,7 @@ Deploy the metric collector, keep the worker inactive and disabled, and run on t
 sudo bash /opt/arenacore/current/infra/runner/verify-metrics.sh
 ```
 
-This command uses the restricted worker identity and production supervisor socket without touching PostgreSQL or Redis. It verifies a successful CPU/memory workload and a cgroup-confirmed OOM, then requires complete sandbox cleanup. Record `RUNNER_METRICS_ACCEPTANCE_PASSED` and `RUNNER_METRICS_HOST_PASSED`. The API execution flags remain disabled until the expanded live isolation suite and independent review also pass.
+This command uses the restricted worker identity and production supervisor socket without touching PostgreSQL or Redis. It verifies a successful CPU/memory workload and a trusted OOM result, then requires complete sandbox cleanup. The production host printed `RUNNER_METRICS_ACCEPTANCE_PASSED` and `RUNNER_METRICS_HOST_PASSED`. The API execution flags remain disabled until the expanded live isolation suite and independent review also pass.
 
 ## Verification
 
@@ -148,4 +148,4 @@ Unit tests exercise comparison/classification, all language observation shapes, 
 
 The standard suite additionally checks Unix RPC and fencing/privacy from previous stages. Real language execution and resource/cleanup behavior require the separate opt-in dedicated-host suite. Hosted CI and a production runtime remain unverified.
 
-Current local verification: schema validation, workspace build, full typecheck and 65 non-integration tests passed. The expanded 15-test live-host suite and service-identity metric gate require the dedicated runner. No database migration was needed for metric collection.
+Current local verification: schema validation, workspace build, full typecheck and 65 non-integration tests passed. The service-identity metric gate passed on the dedicated runner; the expanded 15-test live-host suite remains to be rerun. No database migration was needed for metric collection.
