@@ -4,8 +4,9 @@ import { CAPS, containerArgs, manifestSchema, profiles, RuntimeManifest, Sandbox
 import { SandboxCleanupError } from '@arenacore/contracts';
 import { DockerError, DockerTransport } from './transport';
 import { normalizeJavaArtifacts, packFiles } from './artifacts';
+import { CgroupV2Metrics, metricDelta, MetricsReader } from './metrics';
 
-export interface CaseObservation {caseId:string;stdout:string;stderr:string;exitCode?:number;failure?:'TIME_LIMIT_EXCEEDED'|'MEMORY_LIMIT_EXCEEDED'|'OUTPUT_LIMIT_EXCEEDED';wallMs:number}
+export interface CaseObservation {caseId:string;stdout:string;stderr:string;exitCode?:number;failure?:'TIME_LIMIT_EXCEEDED'|'MEMORY_LIMIT_EXCEEDED'|'OUTPUT_LIMIT_EXCEEDED';wallMs:number;cpuMs?:number;memoryKiB?:number}
 export interface ExecutionObservation {cancellationConfirmed?:true;compilation?:{ok:boolean;stdout:string;stderr:string};cases:CaseObservation[]}
 const infoSchema=z.object({OSType:z.literal('linux'),CgroupVersion:z.literal('2'),CgroupDriver:z.enum(['systemd','cgroupfs']),Runtimes:z.record(z.string(),z.unknown()),SecurityOptions:z.array(z.string()),MemoryLimit:z.literal(true),PidsLimit:z.literal(true),CPUCfsQuota:z.literal(true)});
 // Docker's `{{json .}}` output is not a stable API: Docker 29 omits the
@@ -15,7 +16,8 @@ const infoSchema=z.object({OSType:z.literal('linux'),CgroupVersion:z.literal('2'
 const dockerInfoFormat='{"OSType":{{json .OSType}},"CgroupVersion":{{json .CgroupVersion}},"CgroupDriver":{{json .CgroupDriver}},"Runtimes":{{json .Runtimes}},"SecurityOptions":{{json .SecurityOptions}},"MemoryLimit":{{json .MemoryLimit}},"PidsLimit":{{json .PidsLimit}},"CPUCfsQuota":{{json .CPUCfsQuota}}}';
 export class SandboxSupervisor {
   private manifest:RuntimeManifest;private ready=false;private readonly active=new Map<string,AbortController>();private shuttingDown=false;
-  constructor(private readonly docker:DockerTransport,manifest:unknown){this.manifest=manifestSchema.parse(manifest);}
+  private readonly metrics:MetricsReader;
+  constructor(private readonly docker:DockerTransport,manifest:unknown,metrics?:MetricsReader){this.manifest=manifestSchema.parse(manifest);this.metrics=metrics??new CgroupV2Metrics(docker);}
   async preflight() {
     this.ready=false;
     const info=infoSchema.parse(JSON.parse((await this.docker.command(['info','--format',dockerInfoFormat])).stdout.toString()));
@@ -83,9 +85,11 @@ export class SandboxSupervisor {
         await this.sandbox(request,'run',archive,abort.signal,deadline,async name=>{
           const started=Date.now();
           try {
+            const before=await this.metrics.snapshot(name);
             const result=await this.docker.command(['exec','--interactive',name,...profiles[request.language].command],{input:Buffer.from(test.input),signal:abort.signal,timeoutMs:Math.max(1,Math.min(request.timeMs,deadline-Date.now())),maxBytes:budget,allowFailure:true});
+            const measured=metricDelta(before,await this.metrics.snapshot(name));
             budget-=result.stdout.length+result.stderr.length;
-            observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started});
+            observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started,cpuMs:measured.cpuMs,memoryKiB:measured.memoryKiB,...(measured.oomKilled?{failure:'MEMORY_LIMIT_EXCEEDED' as const}:{})});
           } catch(e) {
             if(e instanceof DockerError && (e.code==='COMMAND_TIMEOUT'||e.code==='OUTPUT_LIMIT')) {observation.cases.push({caseId:test.id,stdout:'',stderr:'',failure:e.code==='COMMAND_TIMEOUT'?'TIME_LIMIT_EXCEEDED':'OUTPUT_LIMIT_EXCEEDED',wallMs:Date.now()-started});budget=e.code==='OUTPUT_LIMIT'?0:budget;}
             else throw e;

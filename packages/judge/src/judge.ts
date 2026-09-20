@@ -3,11 +3,12 @@ import {ExecutionMode,Language,PublicCaseResult,Verdict,languageSchema} from '@a
 import {stripVTControlCharacters} from 'node:util';
 export interface JudgeCase {id:string;ordinal:number;visibility:'PUBLIC'|'HIDDEN';input:string;expectedOutput:string}
 export interface JudgePlan {versionId:string;comparator:'EXACT_NEWLINE';timeMs:number;memoryKiB:number;cases:JudgeCase[]}
-export const observationSchema=z.strictObject({cancellationConfirmed:z.literal(true).optional(),compilation:z.strictObject({ok:z.boolean(),stdout:z.string(),stderr:z.string()}).optional(),cases:z.array(z.strictObject({caseId:z.uuid(),stdout:z.string(),stderr:z.string(),exitCode:z.number().int().min(0).max(255).optional(),failure:z.enum(['TIME_LIMIT_EXCEEDED','MEMORY_LIMIT_EXCEEDED','OUTPUT_LIMIT_EXCEEDED']).optional(),wallMs:z.number().finite().nonnegative()})).max(100)});
+const observedCaseSchema=z.strictObject({caseId:z.uuid(),stdout:z.string(),stderr:z.string(),exitCode:z.number().int().min(0).max(255).optional(),failure:z.enum(['TIME_LIMIT_EXCEEDED','MEMORY_LIMIT_EXCEEDED','OUTPUT_LIMIT_EXCEEDED']).optional(),wallMs:z.number().finite().nonnegative(),cpuMs:z.number().int().nonnegative().optional(),memoryKiB:z.number().int().nonnegative().optional()}).superRefine((value,context)=>{if((value.cpuMs===undefined)!==(value.memoryKiB===undefined))context.addIssue({code:'custom',message:'Metric pair required'});});
+export const observationSchema=z.strictObject({cancellationConfirmed:z.literal(true).optional(),compilation:z.strictObject({ok:z.boolean(),stdout:z.string(),stderr:z.string()}).optional(),cases:z.array(observedCaseSchema).max(100)});
 export type JudgeObservation=z.infer<typeof observationSchema>;
 export type LearnerVerdict=Exclude<Verdict,'CANCELLED'|'INTERNAL_ERROR'>;
 export type JudgedCaseResult=Omit<PublicCaseResult,'verdict'> & {verdict:LearnerVerdict};
-export interface JudgedResult {verdict:LearnerVerdict;publicCaseResults?:JudgedCaseResult[]}
+export interface JudgedResult {verdict:LearnerVerdict;runtimeMs?:number;memoryKiB?:number;publicCaseResults?:JudgedCaseResult[]}
 export class JudgeProtocolError extends Error {constructor(){super('INVALID_JUDGE_PROTOCOL');}}
 export function selectCases(plan:JudgePlan,mode:ExecutionMode) {
   if(plan.comparator!=='EXACT_NEWLINE'||!['RUN','SUBMIT'].includes(mode)||!plan.cases.length||plan.cases.length>100||new Set(plan.cases.map(c=>c.id)).size!==plan.cases.length||new Set(plan.cases.map(c=>c.ordinal)).size!==plan.cases.length||plan.cases.some(c=>!z.uuid().safeParse(c.id).success||!Number.isInteger(c.ordinal)||c.ordinal<0||!['PUBLIC','HIDDEN'].includes(c.visibility)))throw new JudgeProtocolError();
@@ -38,9 +39,9 @@ export function judge(plan:JudgePlan,mode:ExecutionMode,language:Language,input:
     if(mode==='RUN'){
       const stdout=display(o.stdout,Math.min(4096,budget));budget-=Buffer.byteLength(stdout);const stderr=display(o.stderr,Math.min(4096,budget));budget-=Buffer.byteLength(stderr);
       const outputTruncated=Buffer.byteLength(sanitized(o.stdout))>Buffer.byteLength(stdout)||Buffer.byteLength(sanitized(o.stderr))>Buffer.byteLength(stderr);
-      publicCaseResults.push({caseId:test.id,verdict:current,stdout,stderr,...(outputTruncated?{outputTruncated:true}:{}),...(o.exitCode!==undefined?{exitCode:o.exitCode}:{})});
+      publicCaseResults.push({caseId:test.id,verdict:current,stdout,stderr,...(outputTruncated?{outputTruncated:true}:{}),...(o.exitCode!==undefined?{exitCode:o.exitCode}:{}),...(o.cpuMs!==undefined?{runtimeMs:o.cpuMs,memoryKiB:o.memoryKiB}:{})});
     }
   });
-  // wallMs is supervisor/CLI wall time, not trusted CPU time or peak memory.
-  return {verdict,...(mode==='RUN'?{publicCaseResults}:{})};
+  const measured=observed.cases.every(c=>c.cpuMs!==undefined&&c.memoryKiB!==undefined);
+  return {verdict,...(measured?{runtimeMs:Math.max(...observed.cases.map(c=>c.cpuMs!)),memoryKiB:Math.max(...observed.cases.map(c=>c.memoryKiB!))}:{}),...(mode==='RUN'?{publicCaseResults}:{})};
 }

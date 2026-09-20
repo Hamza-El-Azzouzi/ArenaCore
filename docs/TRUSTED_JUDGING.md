@@ -2,7 +2,7 @@
 
 Judging is implemented in `packages/judge`; the separate runner adapter is `apps/runner/src/judging-backend.ts`. A prepared queue-worker entrypoint is `apps/api/src/executions/worker-main.ts`. It runs as a separate process on the dedicated runner host, never from HTTP bootstrap. Sharing the built API artifact reuses its tested job store/lease protocol without giving the HTTP process a Docker socket.
 
-The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check and controlled seven-job live judging gate pass. The abrupt supervisor-death verifier is ready for its host run; trusted metric collection is still pending. This milestone does not clear public launch gates.
+The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check, controlled seven-job live judging gate, and abrupt supervisor-death gate pass. Trusted cgroup metric collection is implemented and awaits its host gate. This milestone does not clear public launch gates.
 
 ## Exact data flow
 
@@ -22,7 +22,7 @@ A failed Java compilation returns COMPILATION_ERROR with no compiler text. Pytho
 
 Acceptance requires a complete, correctly ordered observation for every selected case. A contiguous partial prefix is allowed only when its final observation records a resource stop. Duplicated/foreign/reordered/missing IDs, missing exit information and unknown metadata cause infrastructure failure, never accepted truth. Cancelled observations do not create fake accepted results; the worker's cancellation/lease protocol decides the terminal state after cleanup.
 
-An exit code of 137 does not independently prove OOM. MEMORY_LIMIT_EXCEEDED is supported when the trusted observer explicitly reports it; the current Docker-CLI observer has not implemented measured OOM evidence. Existing nonzero exits therefore remain runtime errors. CPU time and peak memory are omitted until measured reliably, rather than copied from CLI wall time or problem limits.
+An exit code of 137 does not independently prove OOM. `MEMORY_LIMIT_EXCEEDED` is emitted only when the case container's cgroup v2 `oom_kill` counter increases. CPU runtime is the case's `usage_usec` delta and memory is that fresh sandbox's `memory.peak`, rounded up to KiB. The judge requires CPU and memory as a pair, exposes per-case values only for public Run cases, and persists the maximum measured case values as aggregate metrics for Run or Submit. It omits aggregate metrics if any observed case lacks the pair; CLI wall time and configured limits are never presented as measurements.
 
 ## Public/private projection
 
@@ -132,10 +132,20 @@ sudo bash /opt/arenacore/current/infra/runner/verify-crash-recovery.sh
 
 It creates no database or queue job. It sends a controlled execution directly through the worker-readable Unix socket, observes the real `runsc` container, kills the supervisor with `SIGKILL`, and proves systemd did not silently restart it. The independent janitor must remove the resulting container after its existing deadline while the supervisor remains dead. Only then does the verifier restart the supervisor and check its socket. Record `RUNNER_CRASH_RECOVERY_PASSED` as host evidence; keep the worker and public execution disabled afterward.
 
+## Measured resource gate
+
+Deploy the metric collector, keep the worker inactive and disabled, and run on the runner:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-metrics.sh
+```
+
+This command uses the restricted worker identity and production supervisor socket without touching PostgreSQL or Redis. It verifies a successful CPU/memory workload and a cgroup-confirmed OOM, then requires complete sandbox cleanup. Record `RUNNER_METRICS_ACCEPTANCE_PASSED` and `RUNNER_METRICS_HOST_PASSED`. The API execution flags remain disabled until the expanded live isolation suite and independent review also pass.
+
 ## Verification
 
 Unit tests exercise comparison/classification, all language observation shapes, private projections, protocol rejection, cancellation, missing metrics, output limits, pinned plan loading and worker activation gates. Real PostgreSQL/Redis/BullMQ integration tests run the actual judging backend with controlled observation fixtures: a hidden Submit prints sentinel diagnostics but publishes only WRONG_ANSWER; a correct public Run stores only public case results.
 
 The standard suite additionally checks Unix RPC and fencing/privacy from previous stages. Real language execution and resource/cleanup behavior require the separate opt-in dedicated-host suite. Hosted CI and a production runtime remain unverified.
 
-Local verification: schema validation, workspace build, full typecheck and 146 tests passed; 14 live-host tests remain unrun. Dependency audit reported zero known vulnerabilities. No database migration was needed for this stage.
+Current local verification: schema validation, workspace build, full typecheck and 65 non-integration tests passed. The expanded 15-test live-host suite and service-identity metric gate require the dedicated runner. No database migration was needed for metric collection.

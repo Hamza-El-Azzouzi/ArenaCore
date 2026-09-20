@@ -150,6 +150,16 @@ sudo bash /opt/arenacore/current/infra/runner/verify-crash-recovery.sh
 It deliberately kills and later restores the supervisor, so run it from a stable SSH
 session with no accepted traffic. Success prints `RUNNER_CRASH_RECOVERY_PASSED`.
 
+After crash recovery passes and the metric collector is deployed, keep the worker
+inactive and disabled and run:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-metrics.sh
+```
+
+Success prints `RUNNER_METRICS_ACCEPTANCE_PASSED` followed by
+`RUNNER_METRICS_HOST_PASSED`. Keep public execution disabled afterward.
+
 For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,
 so secure host-only SameSite cookies remain available to credentialed API and Socket.IO

@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle drill, restricted worker dependency check and controlled seven-job live judging gate also passed. The abrupt-death verifier is ready for its host run; measured metrics and independent review remain launch gates. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 original live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, and abrupt supervisor-death gates also passed. Cgroup metric collection is implemented and awaits the host gate below; independent review remains a launch gate. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -119,3 +119,22 @@ RUNNER_CRASH_RECOVERY_PASSED
 ```
 
 Do not enable the worker as part of this drill. A pass proves bounded cleanup after abrupt supervisor death for an idle controlled host; it does not yet prove worker crash recovery, queue redelivery, or resource metric accuracy.
+
+## Measured resource evidence gate
+
+The supervisor resolves the running container's unified cgroup v2 path through its Docker PID. For each fresh case it reads `cpu.stat`, `memory.peak`, and `memory.events` before and after the learner process. CPU is the `usage_usec` delta, memory is the sandbox peak rounded up to KiB, and OOM is reported only when `oom_kill` increases. Counter regression, an unscoped cgroup, missing files, or invalid values fail the execution as infrastructure failure. Timeout and output-limit paths omit metrics because the interrupted Docker CLI does not provide a trustworthy final guest snapshot.
+
+After deployment, keep the worker inactive and disabled and run:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-metrics.sh
+```
+
+The verifier talks through the production Unix socket as `arenacore-worker`. It requires positive CPU and bounded peak memory for a successful allocation/workload, then requires an over-limit allocation to produce `MEMORY_LIMIT_EXCEEDED` from the cgroup OOM counter. It also requires an empty managed-container set afterward. Success prints both:
+
+```text
+RUNNER_METRICS_ACCEPTANCE_PASSED
+RUNNER_METRICS_HOST_PASSED
+```
+
+Rerun the expanded live isolation suite as well; its three language cases now require metrics and it includes successful CPU/peak-memory and OOM-counter assertions.
