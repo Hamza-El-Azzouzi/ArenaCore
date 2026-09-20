@@ -118,7 +118,7 @@ sudo systemctl is-enabled arenacore-worker.service || true
 sudo docker ps --all --quiet --filter label=arenacore.managed=true
 ```
 
-The final expected state is `inactive`, `disabled`, and no managed container. A failure prints only its safe stage. Keep execution disabled, preserve the database rows after a result-verification failure for investigation, and inspect the worker/supervisor journals without printing credentials or source.
+The final expected state is `inactive`, `disabled`, and no managed container. A failure prints only its safe stage. The idle preflight also prints aggregate database and queue counts, never job contents. `FIXTURE_VALIDATION` means the published `sum-two-numbers` fixture is absent or no longer has exactly two public and one hidden case. Keep execution disabled, preserve the database rows after a result-verification failure for investigation, and inspect the worker/supervisor journals without printing credentials or source.
 
 ## Verification
 

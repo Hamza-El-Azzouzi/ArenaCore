@@ -36,7 +36,9 @@ async function main(){
     const [unfinished,waiting,active,delayed,prioritized]=await Promise.all([
       db.execution.count({where:{state:{in:['QUEUED','COMPILING','RUNNING']}}}),queue.getWaitingCount(),queue.getActiveCount(),queue.getDelayedCount(),queue.getPrioritizedCount(),
     ]);
+    console.log(`LIVE_JUDGING_IDLE_COUNTS database=${unfinished} waiting=${waiting} active=${active} delayed=${delayed} prioritized=${prioritized}`);
     if(unfinished||waiting||active||delayed||prioritized)throw new Error('ACCEPTANCE_REQUIRES_IDLE_SYSTEM');
+    stage='FIXTURE_VALIDATION';
     const version=await db.problemVersion.findFirst({where:{published:true,problem:{slug:'sum-two-numbers'}},select:{id:true,testCases:{orderBy:{ordinal:'asc'},select:{id:true,visibility:true,input:true,expectedOutput:true}}}});
     if(!version||version.testCases.filter(test=>test.visibility==='PUBLIC').length!==2||version.testCases.filter(test=>test.visibility==='HIDDEN').length!==1)throw new Error('ACCEPTANCE_FIXTURE_UNAVAILABLE');
 
