@@ -36,6 +36,25 @@ if [[ "$(id -gn arenacore-supervisor)" != "arenacore-runner" ]]; then
   echo "RUNNER_BOOTSTRAP_IDENTITY_MISMATCH" >&2
   exit 1
 fi
+
+if ! id arenacore-worker >/dev/null 2>&1; then
+  useradd --system \
+    --gid arenacore-runner \
+    --home-dir /nonexistent \
+    --shell /usr/sbin/nologin \
+    arenacore-worker
+fi
+if [[ "$(id -gn arenacore-worker)" != "arenacore-runner" ]]; then
+  echo "RUNNER_BOOTSTRAP_WORKER_IDENTITY_MISMATCH" >&2
+  exit 1
+fi
+if id -nG arenacore-worker | tr ' ' '\n' | grep -Fxq docker; then
+  gpasswd --delete arenacore-worker docker >/dev/null
+fi
+if id -nG arenacore-worker | tr ' ' '\n' | grep -Fxq docker; then
+  echo "RUNNER_BOOTSTRAP_WORKER_HAS_DOCKER_ACCESS" >&2
+  exit 1
+fi
 usermod --append --groups docker arenacore-supervisor
 if ! id -nG arenacore-supervisor | tr ' ' '\n' | grep -Fxq docker; then
   echo "RUNNER_BOOTSTRAP_DOCKER_GROUP_FAILED" >&2
@@ -61,13 +80,25 @@ install -o root -g root -m 0644 \
 install -o root -g root -m 0644 \
   "$repo_root/infra/runner/arenacore-janitor.timer" \
   /etc/systemd/system/arenacore-janitor.timer
+install -o root -g root -m 0644 \
+  "$repo_root/infra/runner/arenacore-worker.service" \
+  /etc/systemd/system/arenacore-worker.service
+install -o root -g root -m 0644 \
+  "$repo_root/infra/runner/arenacore-worker-check.service" \
+  /etc/systemd/system/arenacore-worker-check.service
 
 systemctl daemon-reload
 systemd-analyze verify \
   /etc/systemd/system/arenacore-supervisor.service \
   /etc/systemd/system/arenacore-janitor.service \
-  /etc/systemd/system/arenacore-janitor.timer
+  /etc/systemd/system/arenacore-janitor.timer \
+  /etc/systemd/system/arenacore-worker.service \
+  /etc/systemd/system/arenacore-worker-check.service
 
 sudo -u arenacore-supervisor test -r /etc/arenacore/runtime-images.json
+if [[ -e /etc/arenacore/worker.env ]]; then
+  chown root:root /etc/arenacore/worker.env
+  chmod 0600 /etc/arenacore/worker.env
+fi
 
 echo "RUNNER_BOOTSTRAP_INSTALLED_NOT_STARTED"

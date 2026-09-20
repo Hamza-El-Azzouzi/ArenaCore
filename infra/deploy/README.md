@@ -104,8 +104,8 @@ host isolation suite passes. When enabled, a runner release must pass preflight 
 the active symlink changes. The API service never receives Docker access.
 
 Before enabling that variable, run the idempotent bootstrap from a reviewed runner-host
-checkout. It creates only the supervisor identity/group, grants Docker access only to
-that supervisor, locks the manifest to
+checkout. It creates separate supervisor and worker identities, grants Docker access only
+to the supervisor, locks the manifest to
 `root:arenacore-runner` mode `0640`, installs and verifies the systemd units, and does
 not start them:
 
@@ -119,6 +119,19 @@ independent orphan cleanup before enabling the judging worker:
 ```sh
 sudo bash infra/runner/verify-services.sh
 ```
+
+After that command prints `RUNNER_SERVICE_LIFECYCLE_PASSED`, create the worker's
+separate database login and root-only `/etc/arenacore/worker.env` as documented in
+`docs/TRUSTED_JUDGING.md`. Rerun bootstrap to install the worker units, then verify all
+private dependencies without consuming a queue job:
+
+```sh
+sudo bash infra/runner/bootstrap-host.sh
+sudo bash infra/runner/verify-worker.sh
+```
+
+Keep `arenacore-worker.service` stopped and disabled after this check. The live-judging
+gate will activate it under controlled test data later.
 
 For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,

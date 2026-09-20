@@ -2,6 +2,7 @@ import {describe,it,expect} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {judge,selectCases,JudgePlan,JudgeProtocolError} from '@arenacore/judge';
 import {JudgingBackend} from '../apps/runner/src/judging-backend';
+import {parseWorkerConfig} from '../apps/api/src/executions/worker-config';
 const plan=():JudgePlan=>({versionId:randomUUID(),comparator:'EXACT_NEWLINE',timeMs:2000,memoryKiB:262144,cases:[{id:randomUUID(),ordinal:0,visibility:'PUBLIC',input:'PUBLIC_INPUT',expectedOutput:'5\n'},{id:randomUUID(),ordinal:1,visibility:'HIDDEN',input:'HIDDEN_INPUT',expectedOutput:'HIDDEN_ANSWER'}]});
 const observations=(p:JudgePlan,mode:'RUN'|'SUBMIT'='SUBMIT')=>({cases:selectCases(p,mode).map(c=>({caseId:c.id,stdout:c.expectedOutput,stderr:'',exitCode:0,wallMs:3}))});
 describe('trusted judge and private projection',()=>{
@@ -30,11 +31,9 @@ describe('worker backend plan and supervisor boundary',()=>{
 });
 
 describe('judging worker launch gates',()=>{
-  it('stays disabled by default and refuses production activation',async()=>{
-    const {spawnSync}=await import('node:child_process');
-    for(const env of [{RUNNER_WORKER_ENABLED:'false'},{RUNNER_WORKER_ENABLED:'true',NODE_ENV:'production'}]){
-      const process=spawnSync(globalThis.process.execPath,['apps/api/dist/executions/worker-main.js'],{env,encoding:'utf8'});
-      expect(process.status).toBe(1);expect(process.stderr).toContain('JUDGING_WORKER_STARTUP_FAILED');expect(process.stdout).not.toContain('STARTED');
-    }
+  const valid={NODE_ENV:'production',RUNNER_WORKER_ENABLED:'true',RUNNER_SOCKET_PATH:'/run/arenacore/supervisor.sock',DATABASE_URL:'postgresql://worker:secret@10.0.0.51:5432/arenacore',REDIS_URL:'redis://:secret@10.0.0.51:6379/0'};
+  it('accepts only an explicit, production worker configuration',()=>{
+    expect(parseWorkerConfig(valid)).toMatchObject({NODE_ENV:'production',QUEUE_NAME:'arenacore-executions'});
+    for(const env of [{},{...valid,NODE_ENV:'development'},{...valid,RUNNER_WORKER_ENABLED:'false'},{...valid,RUNNER_SOCKET_PATH:'relative.sock'},{...valid,REDIS_URL:'redis://host/0?unsafe=true'}])expect(()=>parseWorkerConfig(env)).toThrow('Invalid worker configuration');
   });
 });

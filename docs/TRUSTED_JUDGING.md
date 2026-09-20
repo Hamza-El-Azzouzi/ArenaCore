@@ -2,7 +2,7 @@
 
 Judging is implemented in `packages/judge`; the separate runner adapter is `apps/runner/src/judging-backend.ts`. A prepared queue-worker entrypoint is `apps/api/src/executions/worker-main.ts`. It runs as a separate process on the dedicated runner host, never from HTTP bootstrap. Sharing the built API artifact reuses its tested job store/lease protocol without giving the HTTP process a Docker socket.
 
-The worker remains disabled unless `RUNNER_WORKER_ENABLED=true`, and startup rejects production activation. Stage 6's dedicated gVisor/image/cleanup acceptance and trusted metric collection are still pending. No source is executed by judging fixtures, and this milestone does not clear public launch gates.
+The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite and idle supervisor/janitor lifecycle drill pass; abrupt-death recovery, live judging and trusted metric collection are still pending. No source is executed by judging fixtures, and this milestone does not clear public launch gates.
 
 ## Exact data flow
 
@@ -32,18 +32,49 @@ Submit returns `{verdict}` only: no case IDs, case counts, stdout, stderr, input
 
 ## Prepared worker entrypoint
 
-After the dedicated-host gates and private supervisor installation have passed, the development operator can explicitly start the worker:
+The worker uses its own small configuration schema rather than parsing the API's CORS, OIDC and browser settings. This prevents unrelated web configuration from becoming a hidden runner dependency. It requires production mode, an explicit enable flag, an absolute Unix socket, PostgreSQL/Redis URLs and a bounded queue name. Rejected values are never printed because they may contain credentials.
+
+Create a separate PostgreSQL login for the worker. It needs to read immutable plans and claimed executions, update executions, and create/read/delete bounded public execution events. It does not need migration, user, session, authentication, audit or outbox privileges. Run equivalent reviewed SQL as the database owner, replacing the password before execution:
+
+```sql
+CREATE ROLE arenacore_worker LOGIN PASSWORD 'REPLACE_WITH_RANDOM_PASSWORD';
+GRANT CONNECT ON DATABASE arenacore TO arenacore_worker;
+GRANT USAGE ON SCHEMA public TO arenacore_worker;
+GRANT USAGE ON ALL TYPES IN SCHEMA public TO arenacore_worker;
+GRANT SELECT, UPDATE ON TABLE "Execution" TO arenacore_worker;
+GRANT SELECT, INSERT, DELETE ON TABLE "ExecutionEvent" TO arenacore_worker;
+GRANT SELECT ON TABLE "ProblemVersion", "TestCase" TO arenacore_worker;
+```
+
+On the runner, create `/etc/arenacore/worker.env` as `root:root` mode `0600`. Percent-encode URL-reserved characters in passwords. Use only the private application address:
+
+```dotenv
+DATABASE_URL=postgresql://arenacore_worker:REPLACE_URL_ENCODED_PASSWORD@10.0.0.51:5432/arenacore
+REDIS_URL=redis://:REPLACE_URL_ENCODED_PASSWORD@10.0.0.51:6379/0
+QUEUE_NAME=arenacore-executions
+```
+
+Rerun bootstrap from the deployed checkout, then perform the non-consuming dependency check:
 
 ```sh
-RUNNER_WORKER_ENABLED=true \
+sudo bash infra/runner/bootstrap-host.sh
+sudo bash infra/runner/verify-worker.sh
+```
+
+The check unit runs with the same identity, filesystem restrictions and network allowlist as the real worker. It connects to PostgreSQL and Redis and reaches the Unix supervisor, but it never creates a BullMQ consumer and cannot claim an execution. Success prints `WORKER_INSTALLATION_CHECK_PASSED`; the real worker remains stopped and disabled.
+
+For an approved live-judging gate later, systemd starts the worker with the equivalent configuration:
+
+```sh
+NODE_ENV=production RUNNER_WORKER_ENABLED=true \
 RUNNER_SOCKET_PATH=/run/arenacore/supervisor.sock \
 DATABASE_URL=postgresql://... REDIS_URL=redis://... \
 QUEUE_NAME=arenacore-executions npm run runner:worker
 ```
 
-Inject private credentials through the runner service identity. This entrypoint deliberately does not load the API's root `.env`. The trusted worker joins the supervisor socket's runner group, but has no Docker group/socket access. Supervisor/guest processes do not inherit its database/queue credentials. SIGTERM drains the worker before disconnecting its database; the independent supervisor janitor covers abrupt process death.
+Inject private credentials through systemd's root-only environment file. This entrypoint deliberately does not load the API's root `.env`. The trusted worker joins the supervisor socket's runner group, but has no Docker group/socket access. Supervisor/guest processes do not inherit its database/queue credentials. SIGTERM drains the worker before disconnecting its database; the independent supervisor janitor covers abrupt process death.
 
-Do not enable API creation or activate a real worker on this development host: its `runsc` runtime and verified image manifest are absent. Production startup remains prohibited in this release.
+Do not enable API creation yet. The production worker entrypoint is available for the controlled live-judging gate, but the installed unit remains disabled until that gate, abrupt-death recovery and resource evidence pass.
 
 ## Verification
 

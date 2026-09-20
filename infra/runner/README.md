@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. Service installation, lifecycle drills and trusted-worker integration remain launch gates. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor service lifecycle drill also passed. Abrupt-death recovery, trusted-worker integration, measured metrics and independent review remain launch gates. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -68,7 +68,7 @@ Each container has a random name and labels for execution UUID, attempt and abso
 
 `reapExpired()` scans only managed containers, at most 100 per pass, and removes expired or malformed-deadline resources. An external service must call this periodically, with no overlapping passes, independent of the queue worker's survival. The preflight performs one sweep. The included `arenacore-janitor.service` and `.timer` run the standalone `--janitor` mode independently; templates are not installed or started by this repository. Repeated Docker unavailability requires host-level escalation, not invented cleanup success.
 
-The execution library's `stopAccepting()` aborts active signals and rejects new work. Callers must await their execution promises before exiting. The Unix supervisor server implements bounded admission, body limits, disconnect cancellation and drain. Templates still require host shutdown/crash tests.
+The execution library's `stopAccepting()` aborts active signals and rejects new work. Callers must await their execution promises before exiting. The Unix supervisor server implements bounded admission, body limits, disconnect cancellation and drain. Graceful restart and independent cleanup passed on the host; an abrupt supervisor/worker death drill is still required.
 
 ## Launch state
 
@@ -88,7 +88,7 @@ After the manifest and binaries are present, install the identities and systemd 
 sudo bash infra/runner/bootstrap-host.sh
 ```
 
-The bootstrap is idempotent and ends with `RUNNER_BOOTSTRAP_INSTALLED_NOT_STARTED`. It grants Docker-group access only to `arenacore-supervisor`; the trusted judging worker must use a separate identity with access to the runner Unix socket but no Docker group membership. The bootstrap deliberately does not start or enable either service. Inspect the installed units and run the deployment activation separately.
+The bootstrap is idempotent and ends with `RUNNER_BOOTSTRAP_INSTALLED_NOT_STARTED`. It grants Docker-group access only to `arenacore-supervisor`; `arenacore-worker` shares the private-socket group but is actively removed from the Docker group. It installs the disabled worker and non-consuming dependency-check units as well as the supervisor/janitor units. The bootstrap deliberately does not start or enable the worker. Inspect the installed units and run deployment activation separately.
 
 After activating a release while execution is still disabled, run the idle-only lifecycle verifier:
 
@@ -97,3 +97,5 @@ sudo bash infra/runner/verify-services.sh
 ```
 
 It refuses to continue if any ArenaCore-managed sandbox exists. It verifies the systemd hardening properties, gracefully restarts the supervisor, checks the private socket through the supervisor identity, creates a stopped expired gVisor sandbox, and requires the independent janitor to remove it. Success prints `RUNNER_SERVICE_LIFECYCLE_PASSED`.
+
+That lifecycle verifier passed on the dedicated host. Continue with the worker setup in [the trusted judging guide](../../docs/TRUSTED_JUDGING.md). Do not enable the worker or API execution yet.
