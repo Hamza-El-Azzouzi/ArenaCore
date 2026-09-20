@@ -149,4 +149,6 @@ sudo bash /opt/arenacore/current/infra/runner/verify-security-posture.sh
 
 It checks service identities and groups, Docker-socket separation, manifest/socket permissions, effective systemd confinement, worker state, registered `runsc`, an empty managed-container set, digest-only local images, and nonroot image users. It prints nonsecret `runsc` and manifest fingerprints, followed by `RUNNER_SECURITY_POSTURE_PASSED`. Compare the `runsc` checksum with the approved official gVisor release; a local script cannot establish external provenance. Retain the evidence with the release commit and [security review](../../docs/security/RUNNER_SECURITY_REVIEW.md).
 
+The dedicated host passed this gate on release `65f3688`. Attach its three printed evidence lines to the review record before closing runtime provenance.
+
 The production host printed both metric success codes. Its OOM workload killed the complete gVisor sandbox, so the accepted evidence was Docker's persisted terminal `OOMKilled` state; PID zero prevented a final cgroup snapshot and the protocol correctly omitted fabricated metrics for that case.

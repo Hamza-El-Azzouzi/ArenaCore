@@ -4,6 +4,8 @@ Review date: 2026-09-20
 Scope: dedicated runner, trusted worker, private supervisor protocol, gVisor policy, runtime images, cleanup, judging privacy, and resource evidence  
 Status: internal pre-review complete; independent reviewer sign-off pending
 
+Deployed posture evidence: `RUNNER_SECURITY_POSTURE_PASSED` on release `65f3688` (2026-09-20). The printed fingerprints still need to be attached to the runtime provenance record.
+
 ## Decision
 
 The design is ready to enter independent review. The production host passed the functional and adversarial gates below, and this review found no known critical or high-severity implementation defect in the reviewed scope. Public execution must remain disabled because runtime provenance needs an approved external record, the original sandbox requirement document has not been reconciled, and an independent reviewer has not signed off.
@@ -27,6 +29,7 @@ The dedicated ARM64 production runner passed:
 - Seven-job live judging and hidden-data privacy acceptance.
 - Abrupt supervisor-death recovery with deadline-bound orphan cleanup.
 - Restricted-identity cgroup metrics acceptance.
+- Repeatable security-posture verification for release `65f3688`.
 
 These results apply to the tested release, host configuration, gVisor binary, and image manifest. A changed kernel, Docker/gVisor version, systemd unit, runtime image digest, or sandbox policy requires the affected gates again.
 
