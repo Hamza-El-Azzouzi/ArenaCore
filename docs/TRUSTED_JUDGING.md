@@ -2,7 +2,7 @@
 
 Judging is implemented in `packages/judge`; the separate runner adapter is `apps/runner/src/judging-backend.ts`. A prepared queue-worker entrypoint is `apps/api/src/executions/worker-main.ts`. It runs as a separate process on the dedicated runner host, never from HTTP bootstrap. Sharing the built API artifact reuses its tested job store/lease protocol without giving the HTTP process a Docker socket.
 
-The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill and restricted worker dependency check pass; abrupt-death recovery, live judging and trusted metric collection are still pending. No source is executed by judging fixtures, and this milestone does not clear public launch gates.
+The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check and controlled seven-job live judging gate pass; abrupt-death recovery and trusted metric collection are still pending. This milestone does not clear public launch gates.
 
 ## Exact data flow
 
@@ -108,6 +108,8 @@ sudo docker exec \
 ```
 
 It creates seven controlled executions: correct Run and Submit jobs for Python, JavaScript and Java, plus a wrong Submit that generates hidden output internally. It requires every correct job to finish `ACCEPTED`, the wrong job to finish `WRONG_ANSWER`, every attempt to be fenced and terminal, Run results to contain only public case IDs, and Submit events/results to contain no console output or hidden input/answer sentinel. It waits for BullMQ jobs to leave the active state, removes only its own queue jobs and database fixtures, and prints `LIVE_JUDGING_ACCEPTANCE_PASSED`.
+
+The production gate produced `LIVE_JUDGING_ACCEPTANCE_PASSED`. Its idle counts were zero before fixture creation. Cleanup returned the worker to `inactive` and `disabled`, and Docker reported no ArenaCore-managed container. This is the recorded live judging/privacy acceptance evidence for the current pinned images and release.
 
 Immediately stop the worker on the runner whether the application command passes or fails:
 
