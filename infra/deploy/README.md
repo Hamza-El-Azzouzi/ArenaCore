@@ -140,6 +140,16 @@ gate activates it without enabling it, runs seven controlled jobs from the appli
 container, then stops it. Follow `docs/TRUSTED_JUDGING.md`; do not turn on public API
 execution as part of that gate.
 
+After the live gate has returned the worker to `inactive` and `disabled`, run the
+idle-only abrupt supervisor-death drill on the runner:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-crash-recovery.sh
+```
+
+It deliberately kills and later restores the supervisor, so run it from a stable SSH
+session with no accepted traffic. Success prints `RUNNER_CRASH_RECOVERY_PASSED`.
+
 For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,
 so secure host-only SameSite cookies remain available to credentialed API and Socket.IO

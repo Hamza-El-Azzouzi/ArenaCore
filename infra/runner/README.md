@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle drill, restricted worker dependency check and controlled seven-job live judging gate also passed. Abrupt-death recovery, measured metrics and independent review remain launch gates. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed all 14 live gVisor isolation tests with the pinned three-language manifest. The idle supervisor/janitor lifecycle drill, restricted worker dependency check and controlled seven-job live judging gate also passed. The abrupt-death verifier is ready for its host run; measured metrics and independent review remain launch gates. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -68,7 +68,7 @@ Each container has a random name and labels for execution UUID, attempt and abso
 
 `reapExpired()` scans only managed containers, at most 100 per pass, and removes expired or malformed-deadline resources. An external service must call this periodically, with no overlapping passes, independent of the queue worker's survival. The preflight performs one sweep. The included `arenacore-janitor.service` and `.timer` run the standalone `--janitor` mode independently; templates are not installed or started by this repository. Repeated Docker unavailability requires host-level escalation, not invented cleanup success.
 
-The execution library's `stopAccepting()` aborts active signals and rejects new work. Callers must await their execution promises before exiting. The Unix supervisor server implements bounded admission, body limits, disconnect cancellation and drain. Graceful restart and independent cleanup passed on the host; an abrupt supervisor/worker death drill is still required.
+The execution library's `stopAccepting()` aborts active signals and rejects new work. Callers must await their execution promises before exiting. The Unix supervisor server implements bounded admission, body limits, disconnect cancellation and drain. Graceful restart and independent cleanup passed on the host. The abrupt supervisor-death verifier below must also pass on the deployed runner.
 
 ## Launch state
 
@@ -101,3 +101,21 @@ It refuses to continue if any ArenaCore-managed sandbox exists. It verifies the 
 That lifecycle verifier passed on the dedicated host. Continue with the worker setup in [the trusted judging guide](../../docs/TRUSTED_JUDGING.md). Do not enable the worker or API execution yet.
 
 The restricted dependency verifier also passed. Follow the guide's controlled live-judging gate next: start the worker without enabling it, run the operator-only acceptance command on the application host, then stop the worker and prove no managed sandbox remains.
+
+## Abrupt supervisor-death gate
+
+Run this only while public execution is disabled and the worker is both inactive and disabled:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-crash-recovery.sh
+```
+
+The verifier refuses a busy host. It starts a real Python sandbox through the private Unix socket, proves Docker selected `runsc`, and sends `SIGKILL` to the supervisor's main process. Because the service deliberately uses `Restart=no`, systemd must leave it dead. The managed container must remain observable with its original bounded deadline; this is the orphan whose cleanup cannot depend on the dead supervisor.
+
+The script waits for that signed-integer millisecond deadline, invokes the independent janitor service, requires the orphan to disappear while the supervisor is still inactive, and then explicitly starts the supervisor. It verifies the recovered private socket and an empty managed-container set. A trap makes a best-effort supervisor restart and sandbox removal if an assertion fails. The drill takes roughly 30 seconds and succeeds only with:
+
+```text
+RUNNER_CRASH_RECOVERY_PASSED
+```
+
+Do not enable the worker as part of this drill. A pass proves bounded cleanup after abrupt supervisor death for an idle controlled host; it does not yet prove worker crash recovery, queue redelivery, or resource metric accuracy.

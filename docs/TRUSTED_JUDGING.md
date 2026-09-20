@@ -2,7 +2,7 @@
 
 Judging is implemented in `packages/judge`; the separate runner adapter is `apps/runner/src/judging-backend.ts`. A prepared queue-worker entrypoint is `apps/api/src/executions/worker-main.ts`. It runs as a separate process on the dedicated runner host, never from HTTP bootstrap. Sharing the built API artifact reuses its tested job store/lease protocol without giving the HTTP process a Docker socket.
 
-The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check and controlled seven-job live judging gate pass; abrupt-death recovery and trusted metric collection are still pending. This milestone does not clear public launch gates.
+The worker accepts only an explicit production configuration with `RUNNER_WORKER_ENABLED=true`. Its systemd unit remains disabled until the remaining gates pass. The dedicated gVisor suite, idle supervisor/janitor lifecycle drill, restricted dependency check and controlled seven-job live judging gate pass. The abrupt supervisor-death verifier is ready for its host run; trusted metric collection is still pending. This milestone does not clear public launch gates.
 
 ## Exact data flow
 
@@ -121,6 +121,16 @@ sudo docker ps --all --quiet --filter label=arenacore.managed=true
 ```
 
 The final expected state is `inactive`, `disabled`, and no managed container. A failure prints only its safe stage. The idle preflight also prints aggregate database and queue counts, never job contents. `FIXTURE_VALIDATION` means the published `sum-two-numbers` fixture is absent or no longer has exactly two public and one hidden case. Application deployment runs the compiled production seed after migrations and before switching the active release; it creates an absent fixture and rejects a conflicting existing one. Keep execution disabled, preserve the database rows after a result-verification failure for investigation, and inspect the worker/supervisor journals without printing credentials or source.
+
+## Abrupt supervisor-death gate
+
+After returning the worker to `inactive` and `disabled`, run the idle-only crash verifier on the runner:
+
+```sh
+sudo bash /opt/arenacore/current/infra/runner/verify-crash-recovery.sh
+```
+
+It creates no database or queue job. It sends a controlled execution directly through the worker-readable Unix socket, observes the real `runsc` container, kills the supervisor with `SIGKILL`, and proves systemd did not silently restart it. The independent janitor must remove the resulting container after its existing deadline while the supervisor remains dead. Only then does the verifier restart the supervisor and check its socket. Record `RUNNER_CRASH_RECOVERY_PASSED` as host evidence; keep the worker and public execution disabled afterward.
 
 ## Verification
 
