@@ -63,6 +63,8 @@ sudo bash infra/runner/verify-worker.sh
 
 The check unit runs with the same identity, filesystem restrictions and network allowlist as the real worker. It connects to PostgreSQL and Redis and reaches the Unix supervisor, but it never creates a BullMQ consumer and cannot claim an execution. Success prints `WORKER_INSTALLATION_CHECK_PASSED`; the real worker remains stopped and disabled.
 
+Startup failures log only a safe stage code: `CONFIGURATION`, `DATABASE_CONNECTION`, `DATABASE_PRIVILEGES`, `REDIS_CONNECTION`, `SUPERVISOR_CONNECTION`, or `WORKER_INITIALIZATION`. They never include a URL, password, database error, submitted source or hidden test data.
+
 For an approved live-judging gate later, systemd starts the worker with the equivalent configuration:
 
 ```sh
