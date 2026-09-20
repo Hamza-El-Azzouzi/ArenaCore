@@ -59,10 +59,14 @@ export class SandboxSupervisor {
     const nproc=data.HostConfig.Ulimits.find(v=>v.Name==='nproc');
     if(!data.HostConfig.CapDrop.includes('ALL') || !data.HostConfig.SecurityOpt.some(v=>v.startsWith('no-new-privileges')) || nproc?.Hard!==CAPS.pids || nproc.Soft!==CAPS.pids)throw new Error('SANDBOX_POLICY_MISMATCH');
   }
-  private async terminalOom(name:string) {
+  private async containerState(name:string):Promise<'RUNNING'|'STOPPED'|'OOM'> {
     const result=await this.docker.command(['inspect',name,'--format','{{json .State}}']);
     const parsed=z.object({OOMKilled:z.boolean(),Running:z.boolean(),Pid:z.number().int().nonnegative()}).safeParse(JSON.parse(result.stdout.toString()));
-    return parsed.success&&parsed.data.OOMKilled&&!parsed.data.Running&&parsed.data.Pid===0;
+    if(!parsed.success)throw new Error('INVALID_CONTAINER_STATE');
+    if(parsed.data.OOMKilled&&!parsed.data.Running&&parsed.data.Pid===0)return 'OOM';
+    if(!parsed.data.OOMKilled&&!parsed.data.Running&&parsed.data.Pid===0)return 'STOPPED';
+    if(!parsed.data.OOMKilled&&parsed.data.Running&&parsed.data.Pid>=2)return 'RUNNING';
+    throw new Error('INVALID_CONTAINER_STATE');
   }
   async execute(input:unknown,signal:AbortSignal):Promise<ExecutionObservation> {
     const request=sandboxRequestSchema.parse(input);
@@ -96,7 +100,8 @@ export class SandboxSupervisor {
             let measured;
             try {measured=metricDelta(before,await this.metrics.snapshot(name));}
             catch(e) {
-              if(await this.terminalOom(name)){observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started,failure:'MEMORY_LIMIT_EXCEEDED'});return;}
+              const state=await this.containerState(name);
+              if(state!=='RUNNING'){observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started,...(state==='OOM'?{failure:'MEMORY_LIMIT_EXCEEDED' as const}:{})});return;}
               throw e;
             }
             observation.cases.push({caseId:test.id,stdout:result.stdout.toString(),stderr:result.stderr.toString(),exitCode:result.exitCode,wallMs:Date.now()-started,cpuMs:measured.cpuMs,memoryKiB:measured.memoryKiB,...(measured.oomKilled?{failure:'MEMORY_LIMIT_EXCEEDED' as const}:{})});
