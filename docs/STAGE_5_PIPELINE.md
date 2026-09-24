@@ -12,7 +12,7 @@ REDIS_URL=redis://127.0.0.1:6379/0
 QUEUE_NAME=arenacore-executions
 ```
 
-`PIPELINE_ENABLED=true` enables dispatch/reconciliation, and requires a Redis URL. `REALTIME_ENABLED=true` enables the `/executions` Socket.IO namespace on `/socket.io`, using WebSocket transport only. Either component can be enabled independently. Neither starts an execution backend. New execution creation stays disabled by default, and production creation is still rejected by configuration. During development, creation requires the existing execution quota key.
+`PIPELINE_ENABLED=true` enables dispatch/reconciliation, and requires a Redis URL. `REALTIME_ENABLED=true` enables the `/executions` Socket.IO namespace on `/socket.io`, using WebSocket transport only. Either component can be enabled independently while creation remains off. Neither starts an execution backend. Production creation requires OIDC, pipeline and realtime to be enabled together, plus the independent execution quota key; invalid partial activation fails during configuration parsing.
 
 Local infrastructure is in `infra/compose.dev.yml`. Redis uses a volume, AOF, a 256 MiB limit and `noeviction`; random key eviction would corrupt queue coordination. Redis is a trusted internal service: use ACL credentials and TLS across network boundaries; do not expose its port publicly. The local Compose port binds only to loopback. Test suites use an isolated random queue name and never flush a shared Redis database.
 

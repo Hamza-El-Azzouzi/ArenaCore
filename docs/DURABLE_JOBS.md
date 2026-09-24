@@ -16,7 +16,7 @@ All settings are validated in [Config](../apps/api/src/config/config.ts); the ex
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| EXECUTIONS_ENABLED | false | Creation/retry availability switch; true is still rejected in production |
+| EXECUTIONS_ENABLED | false | Creation/retry availability switch; production also requires OIDC, pipeline and realtime enabled |
 | MAX_ACTIVE_JOBS_PER_USER | 1 | QUEUED + COMPILING + RUNNING jobs per owner |
 | MAX_ACTIVE_JOBS_GLOBAL | 1000 | Total unfinished jobs admitted through the API |
 | EXECUTION_CREATIONS_PER_MINUTE | 10 | Committed new jobs per user in a fixed minute window |
@@ -61,6 +61,6 @@ Capacity and quota errors include Retry-After. An expired job is read successful
 
 [Stage 4 integration scenarios](../tests/executions.integration.test.ts) cover independent API instances, owner/key scoping, rapid cancellation quotas, forwarded-IP spoofing, global-slot races, outbox rollback, version pinning, parallel cancellation, expiry/claim races, bounded concurrent sweeps, automatic scheduling, immutable facts, every distinct state pair, terminal consistency, history timestamp ties, and outbox integrity.
 
-Stage 5 will dispatch durable intents, consume BullMQ jobs with lease/fencing authority, reconcile duplicate delivery/failures, and deliver authenticated bounded Socket.IO replay. The dispatcher must inspect durable job state before enqueueing work; a created intent may coexist with a later cancellation or expiry intent. Execution remains disabled for launch until isolation and trusted judging acceptance gates pass.
+Stage 5 dispatches durable intents, consumes BullMQ jobs with lease/fencing authority, reconciles duplicate delivery/failures, and delivers authenticated bounded Socket.IO replay. The dispatcher inspects durable job state before enqueueing work; a created intent may coexist with a later cancellation or expiry intent. Production configuration now fails closed unless OIDC, dispatch and realtime are enabled together with execution creation. The runner worker remains a separate operational dependency and must pass its host gates before activation.
 
 For the concepts, read [admission quotas](learning/61-durable-admission-and-creation-quotas.md), [advisory locks](learning/62-postgresql-advisory-locks.md), and [background maintenance](learning/63-background-maintenance-and-skip-locked.md).

@@ -59,6 +59,23 @@ describe('deployment config', () => {
     expect(() => parseConfig({...base, EXECUTION_RATE_LIMIT_KEY: 'PRIVATE_BAD_KEY'})).toThrow('Invalid configuration: EXECUTION_RATE_LIMIT_KEY');
     expect(parseConfig({...base, EXECUTION_RATE_LIMIT_KEY: Buffer.alloc(32, 1).toString('base64')}).QUEUE_TTL_SECONDS).toBe(120);
   });
+  it('enables production execution only with identity, dispatch, and realtime together', () => {
+    const key = Buffer.alloc(32, 1).toString('base64');
+    const production = {
+      DATABASE_URL: 'postgresql://localhost/db', NODE_ENV: 'production',
+      PUBLIC_ORIGIN: 'https://arena.example', API_ORIGIN: 'https://api.example',
+      EXECUTIONS_ENABLED: 'true', EXECUTION_RATE_LIMIT_KEY: key,
+      OIDC_ENABLED: 'true', OIDC_ISSUER: 'https://identity.example/',
+      OIDC_CLIENT_ID: 'client', OIDC_CLIENT_SECRET: 'secret', OIDC_TRANSACTION_KEY: key,
+      REDIS_URL: 'redis://redis:6379/0',
+    };
+    expect(() => parseConfig({...production, REALTIME_ENABLED: 'true'})).toThrow('PIPELINE_ENABLED');
+    expect(() => parseConfig({...production, PIPELINE_ENABLED: 'true'})).toThrow('REALTIME_ENABLED');
+    expect(() => parseConfig({...production, PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true', OIDC_ENABLED: 'false'})).toThrow('OIDC_ENABLED');
+    expect(parseConfig({...production, PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true'})).toMatchObject({
+      EXECUTIONS_ENABLED: 'true', PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true', OIDC_ENABLED: 'true',
+    });
+  });
   it('rejects unbounded capacity, invalid quota values, and unsafe queue deadlines', () => {
     const base = {DATABASE_URL: 'postgresql://localhost/db'};
     for (const [key, value] of [['MAX_ACTIVE_JOBS_GLOBAL', '0'], ['EXECUTION_CREATIONS_PER_MINUTE', '-1'],

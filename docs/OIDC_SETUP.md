@@ -14,6 +14,8 @@ For local development the app callback can be `http://localhost:3000/api/v1/auth
 
 The API requests only `openid profile`. Email is not used for account linking. The configured issuer and verified subject together identify the account; token/profile roles never grant administrator access.
 
+The production provider is Auth0. Follow the copy-ready [Auth0 production setup](AUTH0_SETUP.md) for the exact application type, callback, issuer, secret placement and live acceptance checks. The generic requirements below remain the security contract for that integration.
+
 ## Environment
 
 Copy the settings from `.env.example` into your private root `.env` or managed deployment secrets. Set:
@@ -54,6 +56,6 @@ A browser has one active login attempt. Restarting login invalidates that browse
 
 Automated integration checks use the actual OIDC client, RSA-signed JWTs and JWKS responses through a controlled test transport, plus a real HTTP API and PostgreSQL. They verify claim/signature rejection, state/cookie binding, replay races, proof tampering, session rotation, secure cookie attributes, logout, provider outages and rate caps. They do not exercise a third-party provider account or the frontend browser UI.
 
-Before live deployment, register the real provider, verify its exact issuer/algorithm/auth method, configure TLS/proxy routing, and smoke-test sign-in, `/me` and logout with that provider. A real provider has not been connected in this workspace.
+The production Auth0 confidential client is connected. Its authorization-code/PKCE redirect, callback, frontend redirect and authenticated `/me` response passed live browser acceptance on 2026-09-24. Complete the explicit frontend logout check after deploying the current frontend branch, and repeat the flow after any issuer, client credential, origin or callback change.
 
 Implementation references: [openid-client discovery](https://github.com/panva/openid-client/blob/main/docs/functions/discovery.md), [authorization-code checks](https://github.com/panva/openid-client/blob/main/docs/interfaces/AuthorizationCodeGrantChecks.md), and [explicit signature validation](https://github.com/panva/openid-client/blob/main/docs/functions/enableNonRepudiationChecks.md).

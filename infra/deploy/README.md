@@ -68,6 +68,19 @@ Complete the remaining values from `.env.example`. Keep execution disabled until
 runner gates pass. The API has no published host port; Caddy reaches the `arenacore-api`
 alias through `watchtower_backend`.
 
+After every runner and live identity gate passes, production execution must be enabled
+as one configuration transition: set `EXECUTIONS_ENABLED=true`, `PIPELINE_ENABLED=true`
+and `REALTIME_ENABLED=true`, with OIDC already enabled and a stable independent
+`EXECUTION_RATE_LIMIT_KEY`. Configuration parsing rejects a partial production
+activation. Start and verify the runner worker before recreating the API, so newly
+accepted jobs always have a consumer.
+
+Production identity uses an Auth0 **Regular Web Application**. Keep `OIDC_ENABLED=false`
+until its confidential client exists, then add the Auth0 issuer, client ID, client
+secret and transaction key to this root-owned file and enable it. See
+[Auth0 production setup](../../docs/AUTH0_SETUP.md). Auth0 secrets never belong in
+`compose.env`, GitHub Actions, Vercel, or frontend variables.
+
 Before activating the runner, add `10.0.0.51:5432:5432` to the existing PostgreSQL
 service and permit ports 5432 and 6379 in the Oracle network security group from
 `10.0.0.164/32` only. Recreating PostgreSQL causes a short Watchtower database outage,

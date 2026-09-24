@@ -80,7 +80,9 @@ const envSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['API_ORIGIN'], message: 'Use an exact HTTP or HTTPS origin without path, credentials or trailing slash' });
   }
   if (env.NODE_ENV === 'production' && env.EXECUTIONS_ENABLED === 'true') {
-    ctx.addIssue({ code: 'custom', path: ['EXECUTIONS_ENABLED'], message: 'Production execution is not supported in this foundation release' });
+    if (env.OIDC_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['OIDC_ENABLED'], message: 'Required for production execution'});
+    if (env.PIPELINE_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['PIPELINE_ENABLED'], message: 'Required for production execution'});
+    if (env.REALTIME_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['REALTIME_ENABLED'], message: 'Required for production execution'});
   }
   if (env.NODE_ENV === 'production' && origin.protocol !== 'https:') {
     ctx.addIssue({ code: 'custom', path: ['PUBLIC_ORIGIN'], message: 'Production origin must use HTTPS' });
