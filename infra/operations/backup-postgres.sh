@@ -64,7 +64,7 @@ for database in "${databases[@]}"; do
   exists="$(docker exec "$POSTGRES_CONTAINER" sh -ceu \
     'exec psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$1'\''"' \
     sh "$database")"
-  [[ "$exists" == "1" ]] || fail "DATABASE_MISSING"
+  [[ "$exists" == "1" ]] || fail "DATABASE_MISSING_${database}"
 
   docker exec "$POSTGRES_CONTAINER" sh -ceu \
     'exec pg_dump --format=custom --compress=9 --no-owner --no-acl -U "$POSTGRES_USER" -d "$1"' \

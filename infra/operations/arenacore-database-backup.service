@@ -10,6 +10,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/arenacore/current
 ExecStart=/opt/arenacore/current/infra/operations/backup-postgres.sh
+Environment=DOCKER_CONFIG=/tmp/arenacore-backup-docker-config
 UMask=0077
 NoNewPrivileges=yes
 CapabilityBoundingSet=
@@ -29,4 +30,3 @@ ReadWritePaths=/var/backups/arenacore /run/lock
 MemoryMax=1G
 TasksMax=128
 LimitNOFILE=4096
-

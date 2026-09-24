@@ -19,7 +19,7 @@ The package contains individually encrypted custom-format dumps, an encrypted gl
 
 ## OCI setup
 
-Create a private Standard-tier bucket dedicated to database backups. Disable public access. Enable versioning if capacity permits. Add lifecycle rules for the `postgres/` prefix that retain objects for the selected recovery window and delete failed multipart uploads. With one object per day, start with a retention period that fits inside the account's 20 GB combined Always Free Object Storage allowance. Measure the first encrypted archive before choosing the final number of days: `archive size × retained days` must leave safety space for growth and versions. Test deletion rules on nonproduction objects first.
+Create a private Standard-tier bucket dedicated to database backups in the application instance's OCI region. The current script uses the instance-principal region, so a bucket with the same name in another region is not a match. Disable public access. Enable versioning if capacity permits. Add lifecycle rules for the `postgres/` prefix that retain objects for the selected recovery window and delete failed multipart uploads. With one object per day, start with a retention period that fits inside the account's 20 GB combined Always Free Object Storage allowance. Measure the first encrypted archive before choosing the final number of days: `archive size × retained days` must leave safety space for growth and versions. Test deletion rules on nonproduction objects first.
 
 Create a dynamic group whose matching rule contains only the application instance OCID:
 
@@ -27,7 +27,14 @@ Create a dynamic group whose matching rule contains only the application instanc
 instance.id = '<APPLICATION_INSTANCE_OCID>'
 ```
 
-Grant that dynamic group bucket inspection plus object creation and inspection for only the backup bucket. Do not grant object read or delete to the producer. OCI instance principals remove long-lived cloud credentials from the VM and record its OCID in Audit events. Follow Oracle's [instance principal guide](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm) and [Object Storage policy reference](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/objectstoragepolicyreference.htm); validate the exact policy in the tenancy before enabling the timer.
+Grant that dynamic group bucket inspection plus object creation and inspection for only the backup bucket and `postgres/` prefix. `HeadObject` accepts `OBJECT_INSPECT`, so upload verification does not require object download or deletion access. For a bucket named `db_backup` in the root compartment and a dynamic group named `arenacore-backup-writers`, create this policy in the root compartment:
+
+```text
+Allow dynamic-group arenacore-backup-writers to inspect buckets in tenancy where target.bucket.name='db_backup'
+Allow dynamic-group arenacore-backup-writers to manage objects in tenancy where all {target.bucket.name='db_backup', target.object.name='postgres/*', any {request.permission='OBJECT_CREATE', request.permission='OBJECT_INSPECT'}}
+```
+
+Substitute the actual case-sensitive dynamic-group, compartment, bucket, and prefix names. Create the policy at a compartment level that is allowed to address the bucket compartment. Do not grant object read, overwrite, or delete to the producer. OCI instance principals remove long-lived cloud credentials from the VM and record its OCID in Audit events. Follow Oracle's [instance principal guide](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm) and [Object Storage policy reference](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/objectstoragepolicyreference.htm); validate the exact policy in the tenancy before enabling the timer.
 
 Install `age` and the OCI CLI on the application host. Install the CLI outside `/root` so the hardened systemd service can execute it, for example `/opt/oci-cli` with the executable linked into `/usr/local/bin`. Confirm instance-principal access without a user configuration file:
 
