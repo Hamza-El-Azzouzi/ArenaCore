@@ -2,13 +2,13 @@
 
 Review date: 2026-09-20  
 Scope: dedicated runner, trusted worker, private supervisor protocol, gVisor policy, runtime images, cleanup, judging privacy, and resource evidence  
-Status: internal pre-review complete; independent reviewer sign-off pending
+Status: internal pre-review and runtime provenance complete; independent reviewer sign-off pending
 
-Deployed posture evidence: `RUNNER_SECURITY_POSTURE_PASSED` on release `65f3688` (2026-09-20). The printed fingerprints still need to be attached to the runtime provenance record.
+Deployed posture evidence: `RUNNER_SECURITY_POSTURE_PASSED` on release `65f3688` (2026-09-20).
 
 ## Decision
 
-The design is ready to enter independent review. The production host passed the functional and adversarial gates below, and this review found no known critical or high-severity implementation defect in the reviewed scope. Public execution must remain disabled because runtime provenance needs an approved external record, the original sandbox requirement document has not been reconciled, and an independent reviewer has not signed off.
+The design is ready to enter independent review. The production host passed the functional, adversarial, runtime-provenance, host-network, and Oracle network-segmentation gates, and this review found no known critical or high-severity code defect in the reviewed scope. Public execution must remain disabled because the original sandbox requirement document has not been reconciled, production operations remain incomplete, and an independent reviewer has not signed off.
 
 This is an internal engineering review of the repository and operator-supplied host evidence. It does not certify the Oracle network, account security, backup policy, or external identity provider.
 
@@ -31,6 +31,14 @@ The dedicated ARM64 production runner passed:
 - Restricted-identity cgroup metrics acceptance.
 - Repeatable security-posture verification for release `65f3688`.
 
+The posture record is bound to these fingerprints:
+
+- gVisor: `runsc version release-20260914.0`
+- Installed `runsc` SHA-256: `2c5f967247954c80b5e5c8fac6d3f524947db397e4dd679de906acaf029f0b6b`
+- Runtime image manifest SHA-256: `52eb2990ad6ea48e27740efc26e6e467d621c1a516ca53bae0e6d421d9aea79a`
+
+Runtime provenance was independently reproduced from the [official gVisor release](https://github.com/google/gvisor/releases/tag/release-20260914.0). The official `SHA256SUMS` identifies `gvisor-aarch64.tar.bz2` as `218cef646c1c04a62d9acb988127e6da7c4f9e5aaefeef6929893df7a349ecb9`; the downloaded archive matched that hash. The `runsc` extracted from that verified archive produced `2c5f967247954c80b5e5c8fac6d3f524947db397e4dd679de906acaf029f0b6b`, exactly matching the installed host binary. The release tag points to gVisor commit `95eb5d5` and was published on 2026-09-16.
+
 These results apply to the tested release, host configuration, gVisor binary, and image manifest. A changed kernel, Docker/gVisor version, systemd unit, runtime image digest, or sandbox policy requires the affected gates again.
 
 ## Findings
@@ -43,15 +51,15 @@ These results apply to the tested release, host configuration, gVisor binary, an
 
 **SR-03 — Local group authorization.** A process in `arenacore-runner` can call the supervisor socket. Provisioning must restrict this group to the supervisor and trusted worker. The posture verifier checks identities, Docker separation, socket permissions, and effective unit properties.
 
-### Open launch blockers
+### Finding disposition
 
-**SR-04 — Independent review.** A reviewer who did not implement the runner must inspect the policy and protocol and repeat or observe the host gates. Record the reviewer, date, release commit, findings, and disposition here.
+**SR-04 — Independent review — open.** A reviewer who did not implement the runner must inspect the policy and protocol and repeat or observe the host gates. Record the reviewer, date, release commit, findings, and disposition here.
 
-**SR-05 — Runtime provenance.** The repository can fingerprint installed `runsc` and the protected image manifest, but cannot prove that the binary matches the selected official gVisor release. Compare the checksum with the official signed release/checksum source and retain the source and decision.
+**SR-05 — Runtime provenance — closed 2026-09-20.** The installed ARM64 `runsc` SHA-256 exactly matches the binary extracted from the official `release-20260914.0` archive after that archive matched the official `SHA256SUMS`. The protected runtime-image manifest fingerprint is recorded above. Repeat this verification whenever gVisor or the manifest changes.
 
-**SR-06 — Missing authoritative requirements.** The earlier product PDF did not contain the referenced detailed sandbox security specification. Reconcile the implementation with that specification when available. Do not claim specification compliance before comparison.
+**SR-06 — Missing authoritative requirements — open.** The earlier product PDF did not contain the referenced detailed sandbox security specification. Reconcile the implementation with that specification when available. Do not claim specification compliance before comparison.
 
-**SR-07 — Infrastructure network evidence.** Guest `--network=none` passed internet and metadata tests. Oracle security lists/network security groups and host egress rules are outside this repository. Record that the runner exposes no public application port and permits only required private PostgreSQL/Redis destinations and administrative access.
+**SR-07 — Infrastructure network posture — closed 2026-09-24.** Guest `--network=none` passed internet and metadata tests, and Docker publishes no host port. Initial host evidence found unnecessary `rpcbind` listeners on TCP 111 and an unrestricted IPv6 INPUT chain. The operator disabled and masked both `rpcbind` units, removed TCP 111, and installed persistent default-deny IPv6 INPUT rules allowing only loopback, established/related traffic, ICMPv6, and SSH. The application and runner VNICs now use separate NSGs. The application NSG admits public SSH/HTTP/HTTPS and PostgreSQL/Redis only from runner private IP `10.0.0.164/32`; the runner NSG admits SSH and limits new egress to ICMP, HTTP/HTTPS, and PostgreSQL/Redis at `10.0.0.51/32`. Connectivity, both public APIs, and SSH passed after the shared default rules were removed.
 
 ## Repeatable posture check
 
@@ -83,4 +91,4 @@ Save the three evidence values with the release commit. The script does not prin
 
 ## Launch rule
 
-Enable the worker and public execution only after SR-04 through SR-07 are closed and production operations gates pass. A posture-check pass is required evidence, but is not sufficient alone to authorize launch.
+Enable the worker and public execution only after open findings SR-04 and SR-06 are closed and production operations gates pass. A posture-check pass is required evidence, but is not sufficient alone to authorize launch.
