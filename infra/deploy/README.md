@@ -164,3 +164,7 @@ For this deployment use `PUBLIC_ORIGIN=https://arena.helazzou.codes` and
 `API_ORIGIN=https://api-arena.helazzou.codes`. These origins share a registrable domain,
 so secure host-only SameSite cookies remain available to credentialed API and Socket.IO
 requests. Both transports allow only the exact configured frontend origin.
+
+## Database backup and restore
+
+Production uses a client-side encrypted PostgreSQL backup timer that runs daily at 00:00 UTC with OCI instance-principal upload. It covers both databases in the shared PostgreSQL container plus cluster globals and has a fail-closed disposable restore drill. The initial recovery-point objective is 24 hours. Follow [the backup and restore runbook](../../docs/operations/BACKUP_AND_RESTORE.md). Do not enable the timer until a manual upload succeeds, and do not mark the operations gate complete until both application databases restore successfully from an off-host object.
