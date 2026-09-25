@@ -77,5 +77,12 @@ else
   sudo systemctl start arenacore-supervisor.service
   sudo systemctl enable --now arenacore-janitor.timer
   sudo systemctl is-active --quiet arenacore-supervisor.service
+  # Stopping the required supervisor also stops the judging worker. Validate
+  # the new release against its production dependencies before bringing the
+  # worker back, otherwise every deployment leaves accepted jobs in QUEUED.
+  sudo systemctl reset-failed arenacore-worker-check.service arenacore-worker.service || true
+  sudo systemctl start arenacore-worker-check.service
+  sudo systemctl enable --now arenacore-worker.service
+  sudo systemctl is-active --quiet arenacore-worker.service
   echo "RUNNER_DEPLOYED $revision"
 fi
