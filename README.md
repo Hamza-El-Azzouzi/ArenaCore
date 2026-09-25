@@ -45,7 +45,7 @@ The generated UI now lives in the separate frontend repository. Its core problem
 
 ## Learn the backend and NestJS
 
-Start with the [backend learning course](docs/learning/README.md): 83 separate chapters explaining NestJS, architecture, PostgreSQL, authentication, cryptography, testing, deployment, recovery, and public data projections through this project's code. Each topic includes mechanisms, concrete examples, failure cases, and exercises with worked reasoning. Follow the reading paths and finish with the NestJS practice labs. Implemented queue/realtime, supervisor and judging protocols are distinguished from pending live-host acceptance.
+Start with the [backend learning course](docs/learning/README.md): 84 separate chapters explaining NestJS, architecture, PostgreSQL, authentication, cryptography, testing, deployment, recovery, and public data projections through this project's code. Each topic includes mechanisms, concrete examples, failure cases, and exercises with worked reasoning. Follow the reading paths and finish with the NestJS practice labs. Implemented queue/realtime, supervisor and judging protocols are distinguished from pending live-host acceptance.
 
 ## Local backend setup
 
@@ -72,6 +72,8 @@ Available routes under `/api/v1`:
 - `POST /auth/logout` (session + Origin + CSRF required)
 - `GET /profiles/me`, `PATCH /profiles/me`
 - `GET /profiles/:username`, `GET /leaderboard`
+- `GET`, `POST /problems/:slug/discussions`
+- `GET`, `POST /discussions/:id/replies`; `PUT`, `DELETE /discussions/:id/like`
 - `POST /executions`, `GET /executions/:id`, `POST /executions/:id/cancel`
 - `GET /submissions`
 
@@ -123,3 +125,5 @@ Stage 8 has started in the separate frontend repository. The Next.js client now 
 - Frontend integration start: replaced the v0 core-route mocks with a typed, runtime-validated browser client for public problems, OIDC session discovery, CSRF-protected Run/Submit/cancel, private submission history and owner-authenticated Socket.IO replay. Drafts are isolated per problem and language, source size and displayed output are bounded, final snapshots are authoritative, and only public Run case results are rendered. Unsupported mock admin/profile/contest/leaderboard/tournament routes now return 404. Production Auth0 login now completes through the API and `/me` returns the verified user plus session CSRF material. An explicit CSRF-protected sign-out control was added next; 16 frontend tests and the strict production build pass.
 
 - Public profile and leaderboard implementation: added stable unique usernames, bounded optional profile fields, a CSRF-protected audited self-update route, public profile aggregates, UTC contribution/streak calculations, safe recent-submission projections and deterministic cursor-paginated ranking. The frontend profile and leaderboard screens now consume runtime-validated API responses and never expose source, identity-provider identifiers, hidden cases or private diagnostics. The migration and API integration suite pass on a fresh disposable PostgreSQL database; production deployment and browser acceptance remain.
+
+- Problem discussion implementation: added visible/hidden/deleted moderation state, bounded threads and one-level replies, explicit author projections, deterministic cursor pagination, idempotent likes, audited creation and a transactional ten-writes-per-minute user quota shared by all API replicas. Public reads expose no provider or session identity. The real discussion screen supports signed-out reading, authenticated posting/replies/likes and runtime-validates every response. Eight migrations and 17 API integration cases pass on fresh PostgreSQL; production deployment and moderation administration remain.

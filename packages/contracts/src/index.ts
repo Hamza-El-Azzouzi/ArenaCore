@@ -40,8 +40,16 @@ export const updateProfileSchema = z.strictObject({
   website: z.union([z.url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)), z.literal(''), z.null()]).optional(),
 }).refine(value => Object.keys(value).length > 0, 'At least one profile field is required');
 export const leaderboardQuerySchema = paginationSchema;
+export const discussionQuerySchema = paginationSchema;
+export const createDiscussionSchema = z.strictObject({
+  title: z.string().trim().min(5).max(120),
+  body: z.string().trim().min(1).max(4000),
+});
+export const createDiscussionReplySchema = z.strictObject({body: z.string().trim().min(1).max(4000)});
 export type CreateExecution = z.infer<typeof createExecutionSchema>;
 export type UpdateProfile = z.infer<typeof updateProfileSchema>;
+export type CreateDiscussion = z.infer<typeof createDiscussionSchema>;
+export type CreateDiscussionReply = z.infer<typeof createDiscussionReplySchema>;
 
 export interface ProblemSummary {
   id: string; slug: string; title: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; tags: string[]; successRate?: number;
@@ -79,6 +87,11 @@ export interface PublicProfile {
 export interface LeaderboardEntry {
   rank: number; username: string; displayName: string; problemsSolved: number; acceptedSubmissions: number; totalSubmissions: number; successRate: number;
 }
+export interface DiscussionPost {
+  id: string; author: {username: string; displayName: string}; title?: string; body: string;
+  createdAt: string; updatedAt: string; replyCount: number; likeCount: number;
+}
+export interface DiscussionLikeState {postId: string; liked: boolean; likeCount: number}
 
 const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
   QUEUED: ['COMPILING', 'CANCELLED', 'INTERNAL_ERROR'],
