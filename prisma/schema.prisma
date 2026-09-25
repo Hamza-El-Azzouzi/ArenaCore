@@ -53,15 +53,28 @@ enum ExecutionFailureCode {
   JOB_TIMEOUT
   CANCELLATION_TIMEOUT
 }
+enum DiscussionStatus {
+  VISIBLE
+  HIDDEN
+  DELETED
+}
 model User {
   id           String      @id @default(uuid()) @db.Uuid
   issuer       String
   subject      String
   displayName  String
+  username     String      @unique @default(dbgenerated("('user_'::text || replace((gen_random_uuid())::text, '-'::text, ''::text))"))
+  bio          String?
+  location     String?
+  website      String?
   role         Role        @default(USER)
   createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   sessions     Session[]
   executions   Execution[]
+  discussionPosts DiscussionPost[]
+  discussionLikes DiscussionLike[]
+  discussionRateLimit DiscussionRateLimit?
   @@unique([issuer, subject])
 }
 model Session {
@@ -82,6 +95,7 @@ model Problem {
   currentVersionId String? @unique @db.Uuid
   currentVersion ProblemVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id])
   versions   ProblemVersion[] @relation("ProblemVersions")
+  discussionPosts DiscussionPost[]
   createdAt  DateTime         @default(now())
 }
 model ProblemVersion {
@@ -177,6 +191,44 @@ model AuditEvent {
   targetId  String?  @db.Uuid
   createdAt DateTime @default(now())
   @@index([createdAt])
+}
+
+model DiscussionPost {
+  id        String           @id @default(uuid()) @db.Uuid
+  problemId String           @db.Uuid
+  problem   Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  authorId  String           @db.Uuid
+  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentId  String?          @db.Uuid
+  parent    DiscussionPost?  @relation("DiscussionReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   DiscussionPost[] @relation("DiscussionReplies")
+  title     String?
+  body      String
+  status    DiscussionStatus @default(VISIBLE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  likes     DiscussionLike[]
+  @@index([problemId, parentId, status, createdAt, id])
+  @@index([parentId, status, createdAt, id])
+  @@index([authorId, createdAt])
+}
+
+model DiscussionLike {
+  postId    String         @db.Uuid
+  post      DiscussionPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String         @db.Uuid
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model DiscussionRateLimit {
+  userId    String   @id @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  count     Int      @default(1)
+  expiresAt DateTime
+  @@index([expiresAt])
 }
 
 model AuthAttempt {

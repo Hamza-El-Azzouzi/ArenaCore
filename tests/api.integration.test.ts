@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import type { ProblemDetail, SubmissionSummary } from '@arenacore/contracts';
+import type { DiscussionLikeState, DiscussionPost, LeaderboardEntry, ProblemDetail, PublicProfile, SubmissionSummary } from '@arenacore/contracts';
 async function json<T>(response: Response): Promise<T> { return await response.json() as T; }
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createApp } from '../apps/api/src/bootstrap';
@@ -90,10 +90,48 @@ integration('real PostgreSQL API integration', () => {
     expect((await request('/executions', {method: 'POST', body: JSON.stringify(input), headers: {origin: 'https://evil.example', 'idempotency-key': key}})).status).toBe(403);
   });
   it('returns stable CSRF tokens across me calls', async () => {
-    const first = await json<{csrfToken: string}>(await request('/me'));
+    const first = await json<{csrfToken: string; user: {username: string}}>(await request('/me'));
     const second = await json<{csrfToken: string}>(await request('/me'));
     expect(first.csrfToken).toBe(csrf);
     expect(second.csrfToken).toBe(csrf);
+    expect(first.user.username).toMatch(/^user_[a-f0-9]{32}$/);
+  });
+  it('updates and serves a safe public profile', async () => {
+    const username = `learner_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+    const updated = await json<PublicProfile>(await request('/profiles/me', {method: 'PATCH', body: JSON.stringify({username, displayName: 'Integration Learner', bio: 'Solving carefully.', location: 'Casablanca', website: 'https://example.com'})}));
+    expect(updated).toMatchObject({username, displayName: 'Integration Learner', bio: 'Solving carefully.', location: 'Casablanca', website: 'https://example.com'});
+    const publicProfile = await json<PublicProfile>(await request(`/profiles/${username}`, {headers: {cookie: ''}}));
+    expect(publicProfile.stats.totalSubmissions).toBe(0);
+    expect(publicProfile).not.toHaveProperty('issuer');
+    expect(JSON.stringify(publicProfile)).not.toContain('sourceCode');
+    expect((await request('/profiles/me', {method: 'PATCH', body: JSON.stringify({username: 'admin'})})).status).toBe(400);
+  });
+  it('creates, lists, replies to and idempotently likes a public discussion', async () => {
+    expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', headers: {cookie: ''}, body: JSON.stringify({title: 'Unauthenticated question', body: 'This must not be accepted.'})})).status).toBe(401);
+    expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', body: JSON.stringify({title: 'Client-selected moderation', body: 'This must not be accepted.', status: 'VISIBLE'})})).status).toBe(400);
+    const thread = await json<DiscussionPost>(await request('/problems/sum-two-numbers/discussions', {method: 'POST', body: JSON.stringify({title: 'How should overflow be handled?', body: 'I am reasoning about the input bounds without sharing a full solution.'})}));
+    expect(thread).toMatchObject({title: 'How should overflow be handled?', replyCount: 0, likeCount: 0});
+    expect(thread.author.username).toMatch(/^[a-z0-9][a-z0-9_]{1,38}[a-z0-9]$/);
+    const reply = await json<DiscussionPost>(await request(`/discussions/${thread.id}/replies`, {method: 'POST', body: JSON.stringify({body: 'Use the published constraints to choose the numeric range.'})}));
+    expect(reply).not.toHaveProperty('title');
+    await expect(db.discussionPost.create({data: {problemId: sampleProblemId, authorId: ownerId, parentId: reply.id, body: 'Nested reply'}})).rejects.toThrow();
+    const liked = await json<DiscussionLikeState>(await request(`/discussions/${thread.id}/like`, {method: 'PUT'}));
+    const likedAgain = await json<DiscussionLikeState>(await request(`/discussions/${thread.id}/like`, {method: 'PUT'}));
+    expect(liked).toMatchObject({liked: true, likeCount: 1});
+    expect(likedAgain.likeCount).toBe(1);
+    const listed = await json<{items: DiscussionPost[]}>(await request('/problems/sum-two-numbers/discussions', {headers: {cookie: ''}}));
+    expect(listed.items[0]).toMatchObject({id: thread.id, replyCount: 1, likeCount: 1});
+    const replies = await json<{items: DiscussionPost[]}>(await request(`/discussions/${thread.id}/replies`, {headers: {cookie: ''}}));
+    expect(replies.items).toContainEqual(expect.objectContaining({id: reply.id}));
+    expect(JSON.stringify(listed)).not.toContain('issuer');
+  });
+  it('enforces the shared discussion write quota in PostgreSQL', async () => {
+    await db.discussionRateLimit.deleteMany({where: {userId: ownerId}});
+    const responses = [];
+    for (let index = 0; index < 11; index++) responses.push(await request('/problems/sum-two-numbers/discussions', {method: 'POST', body: JSON.stringify({title: `Bounded question ${index}`, body: 'A bounded, constructive question.'})}));
+    expect(responses.slice(0, 10).every(response => response.status === 201)).toBe(true);
+    expect(responses[10]?.status).toBe(429);
+    expect(responses[10]?.headers.get('retry-after')).toBe('60');
   });
   it('enforces UTF-8 limit and rejects extra owner/runtime fields', async () => {
     expect((await request('/executions', {method: 'POST', headers: {'idempotency-key': key}, body: JSON.stringify({...input, sourceCode: 'é'.repeat(32769)})})).status).toBe(413);
@@ -134,6 +172,17 @@ integration('real PostgreSQL API integration', () => {
       expect((await json<{state: string}>(response)).state).toBe('CANCELLED');
     }
     expect(await db.outboxEvent.count({where: {executionId: jobId, kind: 'EXECUTION_CANCELLED'}})).toBe(1);
+  });
+  it('derives public profile statistics and deterministic leaderboard ranks from trusted submits', async () => {
+    const accepted = await db.execution.create({data: {userId: ownerId, problemVersionId: sampleVersionId, language: 'python', mode: 'SUBMIT', sourceCode: 'print(5)', payloadHash: 'b'.repeat(64), idempotencyKey: `profile-${crypto.randomUUID()}`}});
+    await db.execution.update({where: {id: accepted.id}, data: {state: 'COMPILING'}});
+    await db.execution.update({where: {id: accepted.id}, data: {state: 'FINISHED', verdict: 'ACCEPTED', runtimeMs: 42, memoryKiB: 1024, finishedAt: new Date()}});
+    const self = await json<PublicProfile>(await request('/profiles/me'));
+    expect(self.stats).toMatchObject({acceptedSubmissions: 1, problemsSolved: 1});
+    expect(self.languages).toContainEqual({language: 'python', submissions: 2, accepted: 1});
+    expect(self.recentSubmissions[0]).not.toHaveProperty('sourceCode');
+    const board = await json<{items: LeaderboardEntry[]}>(await request('/leaderboard', {headers: {cookie: ''}}));
+    expect(board.items[0]).toMatchObject({rank: 1, username: self.username, problemsSolved: 1, acceptedSubmissions: 1});
   });
   it('rejects malformed and oversized JSON bodies with safe client errors', async () => {
     const malformed = await request('/executions', {method: 'POST', body: '{invalid'});

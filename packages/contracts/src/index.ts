@@ -29,7 +29,27 @@ export const problemQuerySchema = z.strictObject({
   search: z.string().trim().max(100).optional(),
 });
 export const submissionsQuerySchema = paginationSchema.extend({ problemId: uuidSchema.optional() });
+export const usernameSchema = z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9_]{1,38}[a-z0-9]$/)
+  .refine(value => !['admin', 'api', 'auth', 'me', 'system'].includes(value), 'Username is reserved');
+const optionalProfileText = (maximum: number) => z.union([z.string().trim().max(maximum), z.null()]);
+export const updateProfileSchema = z.strictObject({
+  username: usernameSchema.optional(),
+  displayName: z.string().trim().min(1).max(100).optional(),
+  bio: optionalProfileText(280).optional(),
+  location: optionalProfileText(100).optional(),
+  website: z.union([z.url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)), z.literal(''), z.null()]).optional(),
+}).refine(value => Object.keys(value).length > 0, 'At least one profile field is required');
+export const leaderboardQuerySchema = paginationSchema;
+export const discussionQuerySchema = paginationSchema;
+export const createDiscussionSchema = z.strictObject({
+  title: z.string().trim().min(5).max(120),
+  body: z.string().trim().min(1).max(4000),
+});
+export const createDiscussionReplySchema = z.strictObject({body: z.string().trim().min(1).max(4000)});
 export type CreateExecution = z.infer<typeof createExecutionSchema>;
+export type UpdateProfile = z.infer<typeof updateProfileSchema>;
+export type CreateDiscussion = z.infer<typeof createDiscussionSchema>;
+export type CreateDiscussionReply = z.infer<typeof createDiscussionReplySchema>;
 
 export interface ProblemSummary {
   id: string; slug: string; title: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; tags: string[]; successRate?: number;
@@ -55,6 +75,23 @@ export interface SubmissionSummary {
   failureCode?: ExecutionFailureCode;
 }
 export interface ExecutionReceipt { executionId: string; state: ExecutionState; cancellationRequested?: boolean }
+export interface ContributionDay { date: string; count: number; }
+export interface ProfileLanguageStat { language: Language; submissions: number; accepted: number; }
+export interface ProfileDifficultyStat { difficulty: 'EASY' | 'MEDIUM' | 'HARD'; solved: number; total: number; }
+export interface PublicProfile {
+  username: string; displayName: string; bio?: string; location?: string; website?: string; joinedAt: string;
+  stats: {totalSubmissions: number; acceptedSubmissions: number; successRate: number; problemsSolved: number; currentStreak: number; longestStreak: number; averageRuntimeMs?: number};
+  contributions: ContributionDay[]; languages: ProfileLanguageStat[]; difficulties: ProfileDifficultyStat[];
+  recentSubmissions: SubmissionSummary[];
+}
+export interface LeaderboardEntry {
+  rank: number; username: string; displayName: string; problemsSolved: number; acceptedSubmissions: number; totalSubmissions: number; successRate: number;
+}
+export interface DiscussionPost {
+  id: string; author: {username: string; displayName: string}; title?: string; body: string;
+  createdAt: string; updatedAt: string; replyCount: number; likeCount: number;
+}
+export interface DiscussionLikeState {postId: string; liked: boolean; likeCount: number}
 
 const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
   QUEUED: ['COMPILING', 'CANCELLED', 'INTERNAL_ERROR'],

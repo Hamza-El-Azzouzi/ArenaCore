@@ -6,7 +6,7 @@ import { Database } from '../database/database';
 import { Config } from '../config/config';
 import { ApiError } from '../common/errors';
 
-export interface Principal { userId: string; displayName: string; role: 'USER' | 'ADMIN'; sessionId: string; csrfTokenHash: string; csrfToken: string }
+export interface Principal { userId: string; username: string; displayName: string; role: 'USER' | 'ADMIN'; sessionId: string; csrfTokenHash: string; csrfToken: string }
 export type AuthenticatedRequest = Request & { principal: Principal };
 export function hashToken(token: string): string { return createHash('sha256').update(token).digest('hex'); }
 export function hashesEqual(a: string, b: string): boolean {
@@ -28,7 +28,7 @@ export class Sessions {
     if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
     const session = await this.db.session.findUnique({where: {tokenHash: hashToken(token)}, include: {user: true}});
     if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) return null;
-    return {userId: session.userId, displayName: session.user.displayName, role: session.user.role, sessionId: session.id, csrfTokenHash: session.csrfTokenHash, csrfToken: csrfForSession(token)};
+    return {userId: session.userId, username: session.user.username, displayName: session.user.displayName, role: session.user.role, sessionId: session.id, csrfTokenHash: session.csrfTokenHash, csrfToken: csrfForSession(token)};
   }
 }
 @Injectable()
