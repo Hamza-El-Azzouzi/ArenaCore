@@ -67,6 +67,8 @@ integration('real PostgreSQL API integration', () => {
     expect(detail.examples).toHaveLength(2);
     expect(JSON.stringify(detail)).not.toContain('2000000000');
     expect(detail).not.toHaveProperty('testCases');
+    const tagSearch = await json<{items: {id: string}[]}>(await request('/problems?search=STDIN'));
+    expect(tagSearch.items.map(item => item.id)).toContain(sampleProblemId);
     const response = await request('/problems?unexpected=1');
     expect(response.status).toBe(400);
     expect((await json<{error: {requestId: string}}>(response)).error.requestId).toBeTruthy();
