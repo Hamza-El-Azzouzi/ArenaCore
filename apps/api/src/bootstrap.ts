@@ -23,7 +23,7 @@ export function configureApp(app: NestExpressApplication) {
   app.enableCors({
     origin: (origin, callback) => callback(null, origin === publicOrigin),
     credentials: true,
-    methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Idempotency-Key', 'X-CSRF-Token'],
     maxAge: 600,
   });
