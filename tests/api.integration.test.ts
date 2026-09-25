@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import type { ProblemDetail, SubmissionSummary } from '@arenacore/contracts';
+import type { LeaderboardEntry, ProblemDetail, PublicProfile, SubmissionSummary } from '@arenacore/contracts';
 async function json<T>(response: Response): Promise<T> { return await response.json() as T; }
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createApp } from '../apps/api/src/bootstrap';
@@ -90,10 +90,21 @@ integration('real PostgreSQL API integration', () => {
     expect((await request('/executions', {method: 'POST', body: JSON.stringify(input), headers: {origin: 'https://evil.example', 'idempotency-key': key}})).status).toBe(403);
   });
   it('returns stable CSRF tokens across me calls', async () => {
-    const first = await json<{csrfToken: string}>(await request('/me'));
+    const first = await json<{csrfToken: string; user: {username: string}}>(await request('/me'));
     const second = await json<{csrfToken: string}>(await request('/me'));
     expect(first.csrfToken).toBe(csrf);
     expect(second.csrfToken).toBe(csrf);
+    expect(first.user.username).toMatch(/^user_[a-f0-9]{32}$/);
+  });
+  it('updates and serves a safe public profile', async () => {
+    const username = `learner_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+    const updated = await json<PublicProfile>(await request('/profiles/me', {method: 'PATCH', body: JSON.stringify({username, displayName: 'Integration Learner', bio: 'Solving carefully.', location: 'Casablanca', website: 'https://example.com'})}));
+    expect(updated).toMatchObject({username, displayName: 'Integration Learner', bio: 'Solving carefully.', location: 'Casablanca', website: 'https://example.com'});
+    const publicProfile = await json<PublicProfile>(await request(`/profiles/${username}`, {headers: {cookie: ''}}));
+    expect(publicProfile.stats.totalSubmissions).toBe(0);
+    expect(publicProfile).not.toHaveProperty('issuer');
+    expect(JSON.stringify(publicProfile)).not.toContain('sourceCode');
+    expect((await request('/profiles/me', {method: 'PATCH', body: JSON.stringify({username: 'admin'})})).status).toBe(400);
   });
   it('enforces UTF-8 limit and rejects extra owner/runtime fields', async () => {
     expect((await request('/executions', {method: 'POST', headers: {'idempotency-key': key}, body: JSON.stringify({...input, sourceCode: 'é'.repeat(32769)})})).status).toBe(413);
@@ -134,6 +145,17 @@ integration('real PostgreSQL API integration', () => {
       expect((await json<{state: string}>(response)).state).toBe('CANCELLED');
     }
     expect(await db.outboxEvent.count({where: {executionId: jobId, kind: 'EXECUTION_CANCELLED'}})).toBe(1);
+  });
+  it('derives public profile statistics and deterministic leaderboard ranks from trusted submits', async () => {
+    const accepted = await db.execution.create({data: {userId: ownerId, problemVersionId: sampleVersionId, language: 'python', mode: 'SUBMIT', sourceCode: 'print(5)', payloadHash: 'b'.repeat(64), idempotencyKey: `profile-${crypto.randomUUID()}`}});
+    await db.execution.update({where: {id: accepted.id}, data: {state: 'COMPILING'}});
+    await db.execution.update({where: {id: accepted.id}, data: {state: 'FINISHED', verdict: 'ACCEPTED', runtimeMs: 42, memoryKiB: 1024, finishedAt: new Date()}});
+    const self = await json<PublicProfile>(await request('/profiles/me'));
+    expect(self.stats).toMatchObject({acceptedSubmissions: 1, problemsSolved: 1});
+    expect(self.languages).toContainEqual({language: 'python', submissions: 2, accepted: 1});
+    expect(self.recentSubmissions[0]).not.toHaveProperty('sourceCode');
+    const board = await json<{items: LeaderboardEntry[]}>(await request('/leaderboard', {headers: {cookie: ''}}));
+    expect(board.items[0]).toMatchObject({rank: 1, username: self.username, problemsSolved: 1, acceptedSubmissions: 1});
   });
   it('rejects malformed and oversized JSON bodies with safe client errors', async () => {
     const malformed = await request('/executions', {method: 'POST', body: '{invalid'});

@@ -58,8 +58,13 @@ model User {
   issuer       String
   subject      String
   displayName  String
+  username     String      @unique @default(dbgenerated("('user_'::text || replace((gen_random_uuid())::text, '-'::text, ''::text))"))
+  bio          String?
+  location     String?
+  website      String?
   role         Role        @default(USER)
   createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   sessions     Session[]
   executions   Execution[]
   @@unique([issuer, subject])

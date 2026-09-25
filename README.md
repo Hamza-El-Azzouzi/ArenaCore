@@ -45,7 +45,7 @@ The generated UI now lives in the separate frontend repository. Its core problem
 
 ## Learn the backend and NestJS
 
-Start with the [backend learning course](docs/learning/README.md): 82 separate chapters explaining NestJS, architecture, PostgreSQL, authentication, cryptography, testing, deployment, and recovery through this project's code. Each topic includes mechanisms, concrete examples, failure cases, and exercises with worked reasoning. Follow the reading paths and finish with the NestJS practice labs. Implemented queue/realtime, supervisor and judging protocols are distinguished from pending live-host acceptance.
+Start with the [backend learning course](docs/learning/README.md): 83 separate chapters explaining NestJS, architecture, PostgreSQL, authentication, cryptography, testing, deployment, recovery, and public data projections through this project's code. Each topic includes mechanisms, concrete examples, failure cases, and exercises with worked reasoning. Follow the reading paths and finish with the NestJS practice labs. Implemented queue/realtime, supervisor and judging protocols are distinguished from pending live-host acceptance.
 
 ## Local backend setup
 
@@ -70,6 +70,8 @@ Available routes under `/api/v1`:
 - `GET /auth/login`, `GET /auth/callback`
 - `GET /me` (anonymous returns `{user: null}`)
 - `POST /auth/logout` (session + Origin + CSRF required)
+- `GET /profiles/me`, `PATCH /profiles/me`
+- `GET /profiles/:username`, `GET /leaderboard`
 - `POST /executions`, `GET /executions/:id`, `POST /executions/:id/cancel`
 - `GET /submissions`
 
@@ -100,7 +102,7 @@ Stages 1–5 are implemented and verified with automated checks: foundation, per
 
 Current: the stage 6 runtime images, expanded 15-test dedicated-host gVisor suite, idle supervisor/janitor lifecycle drill, restricted worker dependency check, controlled seven-job live judging gate, abrupt supervisor-death recovery gate, and repeatable security-posture gate pass. The installed `runsc` matches the verified official ARM64 artifact. Host firewall remediation and separate application/runner Oracle NSGs pass connectivity checks. Stage 7 is complete. A live encrypted Object Storage upload through the restricted application instance principal passes, the daily timer is active, and both application databases restore from the downloaded off-host package into disposable targets with matching public-table counts. Add backup-failure/staleness alerting and capture a timed recovery next. Execution stays off until the remaining production and independent-review gates pass.
 
-Stage 8 has started in the separate frontend repository. The Next.js client now uses typed and runtime-validated REST responses, credentialed OIDC sessions with CSRF-protected mutations, idempotent execution creation, owner-authenticated Socket.IO replay/reconnect cursors, authoritative final snapshots, bounded console output, public Run case results and private submission history. A production-mode build against `api-arena.helazzou.codes` passes, backend CORS preflight accepts the intended Vercel origin, and route smoke tests pass. Live Auth0 login and authenticated session discovery pass. Logout, Run, Submit, cancel, reconnect and history acceptance remain before Stage 8 can be marked complete.
+Stage 8 has started in the separate frontend repository. The Next.js client now uses typed and runtime-validated REST responses, credentialed OIDC sessions with CSRF-protected mutations, idempotent execution creation, owner-authenticated Socket.IO replay/reconnect cursors, authoritative final snapshots, bounded console output, public Run case results and private submission history. Public profiles and a deterministic leaderboard are implemented from safe backend projections; self edits require the session, exact Origin and CSRF token. A production-mode build against `api-arena.helazzou.codes` passes, backend CORS preflight accepts the intended Vercel origin, and route smoke tests pass. Live Auth0 login and authenticated session discovery pass. The new profile migration and frontend routes require backend-first deployment and live acceptance before they are considered deployed.
 
 ## Implementation log
 
@@ -119,3 +121,5 @@ Stage 8 has started in the separate frontend repository. The Next.js client now 
 - Production recovery implementation: added daily midnight-UTC systemd scheduling, streamed age encryption for both databases and cluster globals, OCI Object Storage upload through an instance principal, bounded local retention, encrypted-package checksums, strict configuration/locking/failure behavior, and a restore drill that can target only a new disposable database. The initial recovery-point objective is 24 hours. A live upload and remote `HeadObject` verification passed on the application host, the daily timer is enabled, and both databases passed checksum-verified decryption, disposable restoration and public-schema table-count comparison from the downloaded OCI object. The disposable databases and temporary in-memory private identity were removed. Backup alerts and a timed recovery record remain required evidence.
 
 - Frontend integration start: replaced the v0 core-route mocks with a typed, runtime-validated browser client for public problems, OIDC session discovery, CSRF-protected Run/Submit/cancel, private submission history and owner-authenticated Socket.IO replay. Drafts are isolated per problem and language, source size and displayed output are bounded, final snapshots are authoritative, and only public Run case results are rendered. Unsupported mock admin/profile/contest/leaderboard/tournament routes now return 404. Production Auth0 login now completes through the API and `/me` returns the verified user plus session CSRF material. An explicit CSRF-protected sign-out control was added next; 16 frontend tests and the strict production build pass.
+
+- Public profile and leaderboard implementation: added stable unique usernames, bounded optional profile fields, a CSRF-protected audited self-update route, public profile aggregates, UTC contribution/streak calculations, safe recent-submission projections and deterministic cursor-paginated ranking. The frontend profile and leaderboard screens now consume runtime-validated API responses and never expose source, identity-provider identifiers, hidden cases or private diagnostics. The migration and API integration suite pass on a fresh disposable PostgreSQL database; production deployment and browser acceptance remain.
