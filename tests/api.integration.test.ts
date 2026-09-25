@@ -77,6 +77,15 @@ integration('real PostgreSQL API integration', () => {
     const allowed = await fetch(`${base}/me`, {method: 'OPTIONS', headers: {origin, 'access-control-request-method': 'GET'}});
     expect(allowed.headers.get('access-control-allow-origin')).toBe(origin);
     expect(allowed.headers.get('access-control-allow-credentials')).toBe('true');
+    const mutationPreflights = await Promise.all(['PATCH', 'PUT', 'DELETE'].map(method => fetch(`${base}/profiles/me`, {method: 'OPTIONS', headers: {origin, 'access-control-request-method': method, 'access-control-request-headers': 'content-type,x-csrf-token'}})));
+    expect(mutationPreflights.every(response => response.status === 204)).toBe(true);
+    for (const response of mutationPreflights) {
+      const methods = response.headers.get('access-control-allow-methods') ?? '';
+      expect(methods).toContain('PATCH');
+      expect(methods).toContain('PUT');
+      expect(methods).toContain('DELETE');
+      expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('x-csrf-token');
+    }
     const denied = await fetch(`${base}/me`, {method: 'OPTIONS', headers: {origin: 'https://evil.example', 'access-control-request-method': 'GET'}});
     expect(denied.headers.get('access-control-allow-origin')).toBeNull();
   });
