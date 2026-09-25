@@ -18,7 +18,7 @@ export class Problems {
   constructor(@Inject(Database) private readonly db: Database) {}
   async list(query: z.infer<typeof problemQuerySchema>) {
     const rows = await this.db.problem.findMany({
-      where: {currentVersion: {is: {published: true, ...(query.difficulty ? {difficulty: query.difficulty} : {}), ...(query.search ? {title: {contains: query.search, mode: 'insensitive' as const}} : {})}}, ...(query.cursor ? {id: {gt: query.cursor}} : {})},
+      where: {currentVersion: {is: {published: true, ...(query.difficulty ? {difficulty: query.difficulty} : {}), ...(query.search ? {OR: [{title: {contains: query.search, mode: 'insensitive' as const}}, {tags: {has: query.search.toLowerCase()}}]} : {})}}, ...(query.cursor ? {id: {gt: query.cursor}} : {})},
       select: {id: true, slug: true, currentVersion: {select: {title: true, difficulty: true, tags: true}}},
       orderBy: {id: 'asc'}, take: 21,
     });
