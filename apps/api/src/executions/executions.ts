@@ -12,7 +12,7 @@ import { ExecutionAdmission } from './admission';
 
 export function payloadHash(input: CreateExecution): string {
   // Explicit field order; transport JSON order never changes the hash.
-  return createHash('sha256').update(JSON.stringify([input.problemId, input.language, input.mode, input.sourceCode])).digest('hex');
+  return createHash('sha256').update(JSON.stringify([input.problemId, input.language, input.mode, input.sourceCode, input.competitionSlug ?? null])).digest('hex');
 }
 @Injectable()
 export class Executions {
@@ -32,8 +32,19 @@ export class Executions {
       if (count >= this.config.values.MAX_ACTIVE_JOBS_PER_USER) throw new ApiError(429, 'ACTIVE_JOB_LIMIT', 'Wait for your active execution to finish.', 5);
       const problem = await tx.problem.findUnique({where: {id: input.problemId}, select: {currentVersion: {select: {id: true, published: true}}}});
       if (!problem?.currentVersion?.published) throw new ApiError(404, 'NOT_FOUND', 'Problem not found.');
+      let competitionRoundId: string | undefined;
+      if (input.competitionSlug) {
+        const now=new Date();
+        const competition=await tx.competition.findFirst({where:{slug:input.competitionSlug,published:true},select:{id:true,startsAt:true,endsAt:true,registrations:{where:{userId},select:{userId:true}},rounds:{where:{startsAt:{lte:now},endsAt:{gt:now},problems:{some:{problemId:input.problemId}}},select:{id:true},take:1}}});
+        if(!competition)throw new ApiError(404,'NOT_FOUND','Competition not found.');
+        if(now<competition.startsAt)throw new ApiError(409,'COMPETITION_NOT_STARTED','This competition has not started yet.');
+        if(now>=competition.endsAt)throw new ApiError(409,'COMPETITION_FINISHED','This competition has finished.');
+        if(!competition.registrations.length)throw new ApiError(403,'REGISTRATION_REQUIRED','Register for this competition before solving its problems.');
+        if(!competition.rounds[0])throw new ApiError(409,'ROUND_NOT_ACTIVE','This problem is not available in an active round.');
+        competitionRoundId=competition.rounds[0].id;
+      }
       await this.admission.reserve(tx, userId, ip);
-      const row = await tx.execution.create({data: {userId, problemVersionId: problem.currentVersion.id, language: input.language, mode: input.mode, sourceCode: input.sourceCode, payloadHash: hash, idempotencyKey: key, queueExpiresAt: new Date(Date.now() + this.config.values.QUEUE_TTL_SECONDS * 1000)}});
+      const row = await tx.execution.create({data: {userId, problemVersionId: problem.currentVersion.id, competitionRoundId, language: input.language, mode: input.mode, sourceCode: input.sourceCode, payloadHash: hash, idempotencyKey: key, queueExpiresAt: new Date(Date.now() + this.config.values.QUEUE_TTL_SECONDS * 1000)}});
       const sequence = await this.jobs.event(tx, row, {kind: 'execution_status', state: 'QUEUED'});
       await tx.execution.update({where: {id: row.id}, data: {lastSequence: sequence}});
       await tx.outboxEvent.create({data: {kind: 'EXECUTION_CREATED', executionId: row.id}});
