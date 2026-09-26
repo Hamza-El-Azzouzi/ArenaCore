@@ -11,6 +11,8 @@ const cursorQuery = z.strictObject({cursor: uuid.optional()});
 const roleInput = z.strictObject({role: z.enum(['USER', 'ADMIN'])});
 const moderationInput = z.strictObject({status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED'])});
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100);
+const testFileName=z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).refine(name=>!['Solution.java','Solution.class','solution.py','solution.js'].includes(name)&&!name.endsWith('.class'),'Reserved or unsafe input filename');
+const testFile=z.strictObject({name:testFileName,content:z.string().max(64_000)});
 const createProblemInput = z.strictObject({
   slug,
   title: z.string().trim().min(3).max(160),
@@ -20,12 +22,17 @@ const createProblemInput = z.strictObject({
   constraints: z.array(z.string().trim().min(1).max(500)).max(30),
   timeMs: z.number().int().min(100).max(30_000),
   memoryKiB: z.number().int().min(16_384).max(1_048_576),
+  inputMode:z.enum(['STDIN','FILES']).default('STDIN'),
   templates: z.strictObject({java: z.string().max(64_000), python: z.string().max(64_000), javascript: z.string().max(64_000)}),
-  tests: z.array(z.strictObject({visibility: z.enum(['PUBLIC', 'HIDDEN']), input: z.string().max(64_000), expectedOutput: z.string().max(64_000)})).min(2).max(100),
+  tests: z.array(z.strictObject({visibility: z.enum(['PUBLIC', 'HIDDEN']), input: z.string().max(64_000), files:z.array(testFile).max(16).default([]), expectedOutput: z.string().max(64_000)}).superRefine((test,context)=>{if(new Set(test.files.map(file=>file.name)).size!==test.files.length)context.addIssue({code:'custom',path:['files'],message:'Input filenames must be unique'});})).min(2).max(100),
   publish: z.boolean(),
 }).superRefine((value, context) => {
   if (!value.tests.some(test => test.visibility === 'PUBLIC')) context.addIssue({code: 'custom', path: ['tests'], message: 'At least one public example is required'});
   if (!value.tests.some(test => test.visibility === 'HIDDEN')) context.addIssue({code: 'custom', path: ['tests'], message: 'At least one hidden test is required'});
+  value.tests.forEach((test,index)=>{
+    if(value.inputMode==='STDIN'&&test.files.length)context.addIssue({code:'custom',path:['tests',index,'files'],message:'STDIN problems cannot define input files'});
+    if(value.inputMode==='FILES'&&(!test.files.length||test.input.length))context.addIssue({code:'custom',path:['tests',index],message:'File problems require files and an empty stdin value'});
+  });
 });
 const createCompetitionInput=z.strictObject({
   slug,
@@ -111,8 +118,8 @@ export class AdminService {
     try {
       return await this.db.$transaction(async tx=>{
         const problem=await tx.problem.create({data:{slug:input.slug}});
-        const version=await tx.problemVersion.create({data:{problemId:problem.id,number:1,title:input.title,difficulty:input.difficulty,tags:[...new Set(input.tags)],statementMarkdown:input.statementMarkdown,constraints:input.constraints,timeMs:input.timeMs,memoryKiB:input.memoryKiB,templates:input.templates,published:false}});
-        await tx.testCase.createMany({data:input.tests.map((test,index)=>({problemVersionId:version.id,ordinal:index+1,...test}))});
+        const version=await tx.problemVersion.create({data:{problemId:problem.id,number:1,title:input.title,difficulty:input.difficulty,tags:[...new Set(input.tags)],statementMarkdown:input.statementMarkdown,constraints:input.constraints,timeMs:input.timeMs,memoryKiB:input.memoryKiB,inputMode:input.inputMode,templates:input.templates,published:false}});
+        for(const [index,test] of input.tests.entries())await tx.testCase.create({data:{problemVersionId:version.id,ordinal:index+1,visibility:test.visibility,input:test.input,expectedOutput:test.expectedOutput,files:{create:test.files}}});
         if(input.publish){await tx.problemVersion.update({where:{id:version.id},data:{published:true}});await tx.problem.update({where:{id:problem.id},data:{currentVersionId:version.id}});}
         await tx.auditEvent.create({data:{actorId,action:input.publish?'PROBLEM_PUBLISH':'PROBLEM_DRAFT_CREATE',targetId:problem.id}});
         return {id:problem.id,slug:problem.slug,versionId:version.id,published:input.publish};

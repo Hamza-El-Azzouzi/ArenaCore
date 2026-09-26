@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {ExecutionMode,Language,PublicCaseResult,Verdict,languageSchema} from '@arenacore/contracts';
 import {stripVTControlCharacters} from 'node:util';
-export interface JudgeCase {id:string;ordinal:number;visibility:'PUBLIC'|'HIDDEN';input:string;expectedOutput:string}
+export interface JudgeCase {id:string;ordinal:number;visibility:'PUBLIC'|'HIDDEN';input:string;files?:{name:string;content:string}[];expectedOutput:string}
 export interface JudgePlan {versionId:string;comparator:'EXACT_NEWLINE';timeMs:number;memoryKiB:number;cases:JudgeCase[]}
 const observedCaseSchema=z.strictObject({caseId:z.uuid(),stdout:z.string(),stderr:z.string(),exitCode:z.number().int().min(0).max(255).optional(),failure:z.enum(['TIME_LIMIT_EXCEEDED','MEMORY_LIMIT_EXCEEDED','OUTPUT_LIMIT_EXCEEDED']).optional(),wallMs:z.number().finite().nonnegative(),cpuMs:z.number().int().nonnegative().optional(),memoryKiB:z.number().int().nonnegative().optional()}).superRefine((value,context)=>{if((value.cpuMs===undefined)!==(value.memoryKiB===undefined))context.addIssue({code:'custom',message:'Metric pair required'});});
 export const observationSchema=z.strictObject({cancellationConfirmed:z.literal(true).optional(),compilation:z.strictObject({ok:z.boolean(),stdout:z.string(),stderr:z.string()}).optional(),cases:z.array(observedCaseSchema).max(100)});

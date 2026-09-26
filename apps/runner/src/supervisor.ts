@@ -92,6 +92,10 @@ export class SandboxSupervisor {
         if(abort.signal.aborted)throw new DockerError('ABORTED');
         if(budget<=0){observation.cases.push({caseId:test.id,stdout:'',stderr:'',failure:'OUTPUT_LIMIT_EXCEEDED',wallMs:0});break;}
         await this.sandbox(request,'run',archive,abort.signal,deadline,async name=>{
+          if(test.files.length){
+            const files=await packFiles(test.files.map(file=>({name:file.name,data:Buffer.from(file.content)})));
+            await this.docker.command(['exec','--interactive',name,'/bin/tar','-x','-f','-','-C','/work'],{input:files,signal:abort.signal});
+          }
           const started=Date.now();
           try {
             const before=await this.metrics.snapshot(name);
