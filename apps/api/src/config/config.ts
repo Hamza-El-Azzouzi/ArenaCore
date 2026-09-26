@@ -22,6 +22,14 @@ const envSchema = z.object({
   OIDC_TRANSACTION_KEY: optionalString(z.string().regex(/^[A-Za-z0-9+/]{43}=$/)),
   OIDC_CLIENT_AUTH_METHOD: z.enum(['client_secret_basic', 'client_secret_post']).default('client_secret_basic'),
   OIDC_ID_TOKEN_ALG: z.enum(['RS256', 'ES256']).default('RS256'),
+  PASSWORD_AUTH_ENABLED: z.enum(['true', 'false']).default('false'),
+  AUTH_TRANSACTION_KEY: optionalString(z.string().regex(/^[A-Za-z0-9+/]{43}=$/)),
+  GOOGLE_AUTH_ENABLED: z.enum(['true', 'false']).default('false'),
+  GOOGLE_CLIENT_ID: optionalString(z.string().min(1).max(255)),
+  GOOGLE_CLIENT_SECRET: optionalString(z.string().min(1)),
+  GITHUB_AUTH_ENABLED: z.enum(['true', 'false']).default('false'),
+  GITHUB_CLIENT_ID: optionalString(z.string().min(1).max(255)),
+  GITHUB_CLIENT_SECRET: optionalString(z.string().min(1)),
   SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86400).default(28800),
   AUTH_LOGIN_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(100).default(20),
   AUTH_LOGIN_GLOBAL_PER_MINUTE: z.coerce.number().int().min(1).max(10000).default(120),
@@ -44,6 +52,15 @@ const envSchema = z.object({
       if (!env[key]) ctx.addIssue({code: 'custom', path: [key], message: 'Required when OIDC is enabled'});
     }
   }
+  if (env.GOOGLE_AUTH_ENABLED === 'true') {
+    for (const key of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const) if (!env[key]) ctx.addIssue({code: 'custom', path: [key], message: 'Required when Google authentication is enabled'});
+  }
+  if (env.GITHUB_AUTH_ENABLED === 'true') {
+    for (const key of ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'] as const) if (!env[key]) ctx.addIssue({code: 'custom', path: [key], message: 'Required when GitHub authentication is enabled'});
+  }
+  if ([env.PASSWORD_AUTH_ENABLED, env.OIDC_ENABLED, env.GOOGLE_AUTH_ENABLED, env.GITHUB_AUTH_ENABLED].includes('true') && !env.AUTH_TRANSACTION_KEY && !env.OIDC_TRANSACTION_KEY) {
+    ctx.addIssue({code: 'custom', path: ['AUTH_TRANSACTION_KEY'], message: 'Required when authentication is enabled'});
+  }
   if (env.OIDC_ISSUER) {
     const issuer = URL.canParse(env.OIDC_ISSUER) ? new URL(env.OIDC_ISSUER) : null;
     if (!issuer || issuer.protocol !== 'https:' || issuer.username || issuer.password || issuer.search || issuer.hash) {
@@ -52,6 +69,9 @@ const envSchema = z.object({
   }
   if (env.OIDC_TRANSACTION_KEY && Buffer.from(env.OIDC_TRANSACTION_KEY, 'base64').toString('base64') !== env.OIDC_TRANSACTION_KEY) {
     ctx.addIssue({code: 'custom', path: ['OIDC_TRANSACTION_KEY'], message: 'Use a canonical base64-encoded 32-byte key'});
+  }
+  if (env.AUTH_TRANSACTION_KEY && Buffer.from(env.AUTH_TRANSACTION_KEY, 'base64').toString('base64') !== env.AUTH_TRANSACTION_KEY) {
+    ctx.addIssue({code: 'custom', path: ['AUTH_TRANSACTION_KEY'], message: 'Use a canonical base64-encoded 32-byte key'});
   }
   if (env.EXECUTION_RATE_LIMIT_KEY && Buffer.from(env.EXECUTION_RATE_LIMIT_KEY, 'base64').toString('base64') !== env.EXECUTION_RATE_LIMIT_KEY) {
     ctx.addIssue({code: 'custom', path: ['EXECUTION_RATE_LIMIT_KEY'], message: 'Use a canonical base64-encoded 32-byte key'});
@@ -80,7 +100,7 @@ const envSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['API_ORIGIN'], message: 'Use an exact HTTP or HTTPS origin without path, credentials or trailing slash' });
   }
   if (env.NODE_ENV === 'production' && env.EXECUTIONS_ENABLED === 'true') {
-    if (env.OIDC_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['OIDC_ENABLED'], message: 'Required for production execution'});
+    if (![env.PASSWORD_AUTH_ENABLED, env.OIDC_ENABLED, env.GOOGLE_AUTH_ENABLED, env.GITHUB_AUTH_ENABLED].includes('true')) ctx.addIssue({code: 'custom', path: ['PASSWORD_AUTH_ENABLED'], message: 'At least one authentication method is required for production execution'});
     if (env.PIPELINE_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['PIPELINE_ENABLED'], message: 'Required for production execution'});
     if (env.REALTIME_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['REALTIME_ENABLED'], message: 'Required for production execution'});
   }
@@ -102,6 +122,8 @@ export class Config {
   readonly values = parseConfig(process.env);
   get executionsEnabled() { return this.values.EXECUTIONS_ENABLED === 'true'; }
   get oidcEnabled() { return this.values.OIDC_ENABLED === 'true'; }
+  get passwordAuthEnabled() { return this.values.PASSWORD_AUTH_ENABLED === 'true'; }
+  get authTransactionKey() { return this.values.AUTH_TRANSACTION_KEY ?? this.values.OIDC_TRANSACTION_KEY; }
   get apiOrigin() { return this.values.API_ORIGIN ?? this.values.PUBLIC_ORIGIN; }
   get secureCookies() { return this.apiOrigin.startsWith('https:'); }
   get callbackUrl() { return `${this.apiOrigin}/api/v1/auth/callback`; }

@@ -25,6 +25,7 @@ integration('OIDC protocol and session integration', () => {
   const stateHashes = new Set<string>();
   const rateKeys = new Set<string>();
   const origin = 'http://localhost:3000';
+  const nativeEmail = 'native-auth-test@arenacore.invalid';
   let sessionCookie: string;
   function request(path: string, options: RequestInit = {}) {
     return fetch(`${base}${path}`, {...options, redirect: 'manual'});
@@ -56,7 +57,7 @@ integration('OIDC protocol and session integration', () => {
     process.env.EXECUTIONS_ENABLED = 'false';
     provider = new OidcProviderFixture();
     await provider.initialize();
-    Object.assign(process.env, {OIDC_ENABLED: 'true', OIDC_ISSUER: provider.issuer, OIDC_CLIENT_ID: provider.clientId, OIDC_CLIENT_SECRET: provider.secret, OIDC_TRANSACTION_KEY: randomBytes(32).toString('base64'), OIDC_CLIENT_AUTH_METHOD: 'client_secret_basic', OIDC_ID_TOKEN_ALG: 'RS256', AUTH_LOGIN_REQUESTS_PER_MINUTE: '100', AUTH_LOGIN_GLOBAL_PER_MINUTE: '500', TRUST_PROXY_CIDRS: ''});
+    Object.assign(process.env, {OIDC_ENABLED: 'true', PASSWORD_AUTH_ENABLED: 'true', OIDC_ISSUER: provider.issuer, OIDC_CLIENT_ID: provider.clientId, OIDC_CLIENT_SECRET: provider.secret, OIDC_TRANSACTION_KEY: randomBytes(32).toString('base64'), OIDC_CLIENT_AUTH_METHOD: 'client_secret_basic', OIDC_ID_TOKEN_ALG: 'RS256', AUTH_LOGIN_REQUESTS_PER_MINUTE: '100', AUTH_LOGIN_GLOBAL_PER_MINUTE: '500', TRUST_PROXY_CIDRS: ''});
     config = new Config();
     db = new PrismaClient({datasources: {db: {url: process.env.TEST_DATABASE_URL}}});
     const module = await Test.createTestingModule({imports: [AppModule]})
@@ -70,7 +71,7 @@ integration('OIDC protocol and session integration', () => {
     await app?.close();
     if (db) {
       if (provider) {
-        const users = await db.user.findMany({where: {issuer: provider.issuer, subject: provider.subject}, select: {id: true}});
+        const users = await db.user.findMany({where: {OR: [{issuer: provider.issuer, subject: provider.subject}, {issuer: 'arenacore:password', subject: nativeEmail}]}, select: {id: true}});
         await db.auditEvent.deleteMany({where: {actorId: {in: users.map(u=>u.id)}}});
         await db.user.deleteMany({where: {id: {in: users.map(u=>u.id)}}});
       }
@@ -80,6 +81,9 @@ integration('OIDC protocol and session integration', () => {
     }
     // Test files may share a worker; leave identity disabled for unrelated suites.
     process.env.OIDC_ENABLED = 'false';
+    process.env.PASSWORD_AUTH_ENABLED = 'false';
+    process.env.GOOGLE_AUTH_ENABLED = 'false';
+    process.env.GITHUB_AUTH_ENABLED = 'false';
   });
   it('keeps identity disabled until configured and rejects external return targets', async () => {
     config.values.OIDC_ENABLED = 'false';
@@ -88,6 +92,27 @@ integration('OIDC protocol and session integration', () => {
     expect((await request('/auth/login?returnTo=https://attacker.example')).status).toBe(400);
     expect((await request('/auth/login', {headers: {origin: 'https://attacker.example'}})).status).toBe(403);
     expect((await request('/auth/login', {headers: {'sec-fetch-site': 'cross-site'}})).status).toBe(403);
+  });
+  it('registers and signs in locally without exposing or storing a plaintext password', async () => {
+    currentRateKeys();
+    const password = 'correct horse battery staple';
+    expect((await request('/auth/register', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({displayName: 'Native User', email: nativeEmail.toUpperCase(), password})})).status).toBe(201);
+    const duplicate = await request('/auth/register', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({displayName: 'Duplicate', email: nativeEmail, password})});
+    expect(duplicate.status).toBe(409);
+    const credential = await db.credential.findUniqueOrThrow({where: {email: nativeEmail}, include: {user: true}});
+    expect(credential.passwordHash).toMatch(/^scrypt\$32768\$8\$1\$/);
+    expect(credential.passwordHash).not.toContain(password);
+    expect(credential.user.displayName).toBe('Native User');
+    const wrong = await request('/auth/password', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({email: nativeEmail, password: 'this password is incorrect'})});
+    expect(wrong.status).toBe(401);
+    expect((await body<{error:{code:string}}>(wrong)).error.code).toBe('INVALID_CREDENTIALS');
+    expect((await request('/auth/password', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({email: nativeEmail, password})})).status).toBe(403);
+    expect((await request('/auth/password', {method: 'POST', headers: {'content-type': 'application/json', origin: 'https://attacker.example'}, body: JSON.stringify({email: nativeEmail, password})})).status).toBe(403);
+    const signedIn = await request('/auth/password', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({email: nativeEmail, password})});
+    expect(signedIn.status).toBe(200);
+    const cookie = signedIn.headers.getSetCookie()[0]!.split(';')[0]!;
+    const me = await body<Me>(await request('/me', {headers: {cookie}}));
+    expect(me.user?.displayName).toBe('Native User');
   });
   it('creates an encrypted expiring proof and a browser-bound PKCE redirect', async () => {
     const flow = await start();

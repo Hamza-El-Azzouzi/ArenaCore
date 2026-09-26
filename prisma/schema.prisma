@@ -79,6 +79,7 @@ model User {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   sessions     Session[]
+  credential   Credential?
   executions   Execution[]
   discussionPosts DiscussionPost[]
   discussionLikes DiscussionLike[]
@@ -86,6 +87,15 @@ model User {
   competitionRegistrations CompetitionRegistration[]
   ownedCompetitions Competition[] @relation("CompetitionOwner")
   @@unique([issuer, subject])
+}
+model Credential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 model Session {
   id            String    @id @default(uuid()) @db.Uuid

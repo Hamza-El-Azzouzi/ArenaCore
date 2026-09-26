@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Inject, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { serialize } from 'cookie';
 import { Config } from '../config/config';
@@ -7,16 +7,41 @@ import { z } from 'zod';
 import { LoginService, LOGIN_TTL_SECONDS } from './login.service';
 import { Database } from '../database/database';
 import { AuthenticatedRequest, Sessions, SessionGuard } from './session';
+import { PasswordAuthService } from './password-auth.service';
+
+const email = z.string().trim().toLowerCase().email().max(254);
+const password = z.string().min(12).max(128).refine(value => Buffer.byteLength(value, 'utf8') <= 256);
+const displayName = z.string().trim().min(2).max(120).refine(value => !/[\u0000-\u001f\u007f]/.test(value));
 
 @Controller()
 export class AuthController {
-  constructor(@Inject(Sessions) private readonly sessions: Sessions, @Inject(Database) private readonly db: Database, @Inject(Config) private readonly config: Config, @Inject(LoginService) private readonly loginService: LoginService) {}
+  constructor(@Inject(Sessions) private readonly sessions: Sessions, @Inject(Database) private readonly db: Database, @Inject(Config) private readonly config: Config, @Inject(LoginService) private readonly loginService: LoginService, @Inject(PasswordAuthService) private readonly passwordAuth: PasswordAuthService) {}
   @Get('auth/login')
   async login(@Req() req: Request, @Query() query: unknown, @Res() res: Response) {
-    validate(z.strictObject({}), query);
-    const {location, browserToken} = await this.loginService.begin(req);
+    const {provider} = validate(z.strictObject({provider: z.enum(['auth0', 'google', 'github']).default('auth0')}), query);
+    const {location, browserToken} = await this.loginService.begin(req, provider);
     res.setHeader('Set-Cookie', serialize(this.config.loginCookieName, browserToken, {httpOnly: true, secure: this.config.secureCookies, sameSite: 'lax', path: '/', maxAge: LOGIN_TTL_SECONDS}));
     res.redirect(302, location);
+  }
+  private setSessionCookie(res: Response, session: {token: string; expiresAt: Date}) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Set-Cookie', serialize(this.config.cookieName, session.token, {httpOnly: true, secure: this.config.secureCookies, sameSite: 'lax', path: '/', maxAge: this.config.values.SESSION_TTL_SECONDS, expires: session.expiresAt}));
+  }
+  @Post('auth/register')
+  @HttpCode(201)
+  async register(@Req() req: Request, @Body() body: unknown, @Res({passthrough: true}) res: Response) {
+    const input = validate(z.strictObject({email, password, displayName}), body);
+    const session = await this.passwordAuth.register(req, input);
+    this.setSessionCookie(res, session);
+    return {ok: true};
+  }
+  @Post('auth/password')
+  @HttpCode(200)
+  async passwordLogin(@Req() req: Request, @Body() body: unknown, @Res({passthrough: true}) res: Response) {
+    const input = validate(z.strictObject({email, password}), body);
+    const session = await this.passwordAuth.authenticate(req, input);
+    this.setSessionCookie(res, session);
+    return {ok: true};
   }
   @Get('auth/callback')
   async callback(@Req() req: Request, @Query() query: unknown, @Res() res: Response) {

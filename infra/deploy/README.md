@@ -75,11 +75,12 @@ and `REALTIME_ENABLED=true`, with OIDC already enabled and a stable independent
 activation. Start and verify the runner worker before recreating the API, so newly
 accepted jobs always have a consumer.
 
-Production identity uses an Auth0 **Regular Web Application**. Keep `OIDC_ENABLED=false`
-until its confidential client exists, then add the Auth0 issuer, client ID, client
-secret and transaction key to this root-owned file and enable it. See
-[Auth0 production setup](../../docs/AUTH0_SETUP.md). Auth0 secrets never belong in
-`compose.env`, GitHub Actions, Vercel, or frontend variables.
+Production can use ArenaCore email/password accounts and direct Google or GitHub
+login without Auth0. Configure at least one method and a stable transaction key in
+the root-owned API environment. See
+[authentication setup](../../docs/AUTHENTICATION_SETUP.md). Provider secrets never
+belong in `compose.env`, GitHub Actions, Vercel, or frontend variables. The existing
+Auth0 connection remains available through [Auth0 production setup](../../docs/AUTH0_SETUP.md).
 
 Before activating the runner, add `10.0.0.51:5432:5432` to the existing PostgreSQL
 service and permit ports 5432 and 6379 in the Oracle network security group from
