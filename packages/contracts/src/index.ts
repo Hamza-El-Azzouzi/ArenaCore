@@ -9,6 +9,7 @@ export const verdictSchema = z.enum(['ACCEPTED', 'WRONG_ANSWER', 'COMPILATION_ER
 export const executionFailureCodeSchema = z.enum(['QUEUE_TIMEOUT', 'JOB_FAILURE', 'LEASE_EXPIRED', 'JOB_TIMEOUT', 'CANCELLATION_TIMEOUT']);
 export type ExecutionFailureCode = z.infer<typeof executionFailureCodeSchema>;
 export type Language = z.infer<typeof languageSchema>;
+export type ProblemInputMode = 'STDIN' | 'FILES';
 export type ExecutionMode = z.infer<typeof modeSchema>;
 export type ExecutionState = z.infer<typeof stateSchema>;
 export type Verdict = z.infer<typeof verdictSchema>;
@@ -58,7 +59,8 @@ export interface ProblemSummary {
 export interface ProblemDetail extends ProblemSummary {
   statementMarkdown: string; constraints: string[];
   limits: { timeMs: number; memoryKiB: number };
-  examples: { id: string; input: string; expectedOutput: string }[];
+  inputMode: ProblemInputMode;
+  examples: { id: string; input: string; files: {name:string; content:string}[]; expectedOutput: string }[];
   templates: Record<Language, string>;
 }
 export interface PublicCaseResult {

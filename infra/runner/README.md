@@ -1,6 +1,6 @@
 # Dedicated runner host setup and isolation acceptance
 
-Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed the expanded 15-test live gVisor suite with the pinned three-language manifest. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, abrupt supervisor-death, and restricted-identity cgroup metric gates also passed. Independent review remains a launch gate. Do not enable public execution from this guide alone.
+Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed the earlier 15-test live gVisor suite with the pinned three-language manifest. The suite now contains 19 tests after adding file-backed input delivery and cross-case file cleanup; those four checks require a fresh host run. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, abrupt supervisor-death, and restricted-identity cgroup metric gates also passed. Independent review remains a launch gate. Do not enable public execution from this guide alone.
 
 ## Host boundary
 
@@ -58,7 +58,7 @@ node_modules/.bin/vitest run tests/runner-isolation.integration.test.ts
 
 Opting in makes missing images/runtime fail the suite; it never falls back to ordinary Docker. Standard CI skips these tests because its PostgreSQL/Redis services do not provide a dedicated gVisor runner.
 
-The current live suite covers all three languages with measured metrics, infinite loops, output flooding, internet/metadata blocking, root filesystem/socket access, fresh scratch between cases, memory/PID/scratch caps, credential absence, cancellation with children, and malformed compilation. All 15 tests passed on the dedicated ARM64 gVisor host using the approved digest-only manifest.
+The current live suite covers all three languages with measured metrics, stdin and file-backed inputs, infinite loops, output flooding, internet/metadata blocking, root filesystem/socket access, fresh scratch and file cleanup between cases, memory/PID/scratch caps, credential absence, cancellation with children, and malformed compilation. The original 15 tests passed on the dedicated ARM64 gVisor host using the approved digest-only manifest; run the expanded 19-test suite before accepting this release.
 
 Complete the remaining acceptance drills before stage 6 is marked complete: measured memory/PID/CPU/file/scratch enforcement; fork bombs and child-process escape attempts; compiler abuse; cross-job/process visibility; no host/API/DB/Redis credentials; cancellation during creation/compile/run; worker/supervisor death; bounded external orphan cleanup; restart and drain behavior; verified runtime/image provenance; and independent security review. Add real tests for these properties, rather than checking command flags alone.
 

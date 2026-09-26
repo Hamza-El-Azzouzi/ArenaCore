@@ -92,6 +92,11 @@ integration('real PostgreSQL API integration', () => {
   it('enforces published problem/test immutability at the database boundary', async () => {
     await expect(db.problemVersion.update({where: {id: sampleVersionId}, data: {title: 'tampered'}})).rejects.toThrow();
     await expect(db.testCase.updateMany({where: {problemVersionId: sampleVersionId}, data: {expectedOutput: 'tampered'}})).rejects.toThrow();
+    const draftProblem=await db.problem.create({data:{slug:`invalid-file-${crypto.randomUUID()}`}});
+    const draftVersion=await db.problemVersion.create({data:{problemId:draftProblem.id,number:1,title:'Invalid file contract',difficulty:'EASY',tags:[],statementMarkdown:'This draft deliberately violates the file input contract.',constraints:[],timeMs:1000,memoryKiB:65536,inputMode:'FILES',templates:{java:'x',python:'x',javascript:'x'}}});
+    await db.testCase.create({data:{problemVersionId:draftVersion.id,ordinal:0,visibility:'PUBLIC',input:'stdin is forbidden',expectedOutput:'x'}});
+    await expect(db.problemVersion.update({where:{id:draftVersion.id},data:{published:true}})).rejects.toThrow();
+    await db.testCase.deleteMany({where:{problemVersionId:draftVersion.id}});await db.problemVersion.delete({where:{id:draftVersion.id}});await db.problem.delete({where:{id:draftProblem.id}});
   });
   it('fails closed without session and on bad CSRF/origin', async () => {
     expect((await request('/executions', {method: 'POST', body: JSON.stringify(input), headers: {cookie: '', 'idempotency-key': key}})).status).toBe(401);
@@ -247,6 +252,14 @@ integration('real PostgreSQL API integration', () => {
     await db.problemVersion.deleteMany({where:{problemId:created.id}});
     await db.auditEvent.deleteMany({where:{targetId:created.id}});
     await db.problem.delete({where:{id:created.id}});
+    const fileProblemSlug=`file-${crypto.randomUUID()}`;
+    const fileProblem=await json<{id:string;versionId:string;published:boolean}>(await request('/admin/problems',{method:'POST',body:JSON.stringify({slug:fileProblemSlug,title:'File Input Integration Problem',difficulty:'MEDIUM',tags:['files'],statementMarkdown:'Read values from the declared input text file and print their sum.',constraints:['The file contains two bounded integers.'],timeMs:1000,memoryKiB:65536,inputMode:'FILES',templates:{java:'// read input.txt',python:'open("input.txt")',javascript:'readFileSync("input.txt")'},tests:[{visibility:'PUBLIC',input:'',files:[{name:'input.txt',content:'1 2\n'}],expectedOutput:'3\n'},{visibility:'HIDDEN',input:'',files:[{name:'secret.txt',content:'PRIVATE_FILE_CONTENT'}],expectedOutput:'7\n'}],publish:true})}));
+    expect(fileProblem.published).toBe(true);
+    const fileDetail=await json<ProblemDetail>(await request(`/problems/${fileProblemSlug}`));
+    expect(fileDetail).toMatchObject({difficulty:'MEDIUM',inputMode:'FILES',examples:[{input:'',files:[{name:'input.txt',content:'1 2\n'}],expectedOutput:'3\n'}]});
+    expect(JSON.stringify(fileDetail)).not.toContain('PRIVATE_FILE_CONTENT');
+    const publicFile=await db.testCaseFile.findFirstOrThrow({where:{testCase:{problemVersionId:fileProblem.versionId,visibility:'PUBLIC'}}});
+    await expect(db.testCaseFile.update({where:{testCaseId_name:{testCaseId:publicFile.testCaseId,name:publicFile.name}},data:{content:'tampered'}})).rejects.toThrow();
     const competitionSlug=`competition-${crypto.randomUUID()}`;
     const startsAt=new Date(Date.now()+3_600_000),endsAt=new Date(Date.now()+7_200_000);
     const competition=await json<{id:string;published:boolean}>(await request('/admin/competitions',{method:'POST',body:JSON.stringify({slug:competitionSlug,kind:'CONTEST',title:'Integration Contest',description:'A safely created integration contest.',rulesMarkdown:'Highest score wins this integration contest.',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),published:false,rounds:[{title:'Main round',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),problemSlugs:['sum-two-numbers']}]})}));

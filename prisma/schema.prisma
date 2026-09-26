@@ -46,6 +46,10 @@ enum Visibility {
   PUBLIC
   HIDDEN
 }
+enum ProblemInputMode {
+  STDIN
+  FILES
+}
 enum ExecutionFailureCode {
   QUEUE_TIMEOUT
   JOB_FAILURE
@@ -177,6 +181,7 @@ model ProblemVersion {
   timeMs            Int
   memoryKiB         Int
   templates         Json
+  inputMode         ProblemInputMode @default(STDIN)
   comparator        String         @default("EXACT_NEWLINE")
   testCases         TestCase[]
   executions        Execution[]
@@ -192,8 +197,16 @@ model TestCase {
   visibility       Visibility
   input            String
   expectedOutput   String
+  files            TestCaseFile[]
   @@unique([problemVersionId, ordinal])
   @@index([problemVersionId, visibility])
+}
+model TestCaseFile {
+  testCaseId String   @db.Uuid
+  testCase   TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  name       String
+  content    String
+  @@id([testCaseId, name])
 }
 model Execution {
   id               String         @id @default(uuid()) @db.Uuid
