@@ -1,6 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
 export class ApiError extends HttpException {
@@ -38,7 +39,13 @@ export class ErrorFilter implements ExceptionFilter {
     }
     const requestId = typeof res.getHeader('X-Request-Id') === 'string' ? res.getHeader('X-Request-Id') : randomUUID();
     // Do not log bodies, URLs with query secrets, DB messages, or stack traces.
-    if (status >= 500) console.error(JSON.stringify({level: 'error', requestId, method: req.method, status, code}));
+    const databaseCode = exception instanceof Prisma.PrismaClientKnownRequestError ? exception.code : undefined;
+    const errorType = exception instanceof Prisma.PrismaClientKnownRequestError ? 'DATABASE_KNOWN'
+      : exception instanceof Prisma.PrismaClientUnknownRequestError ? 'DATABASE_UNKNOWN'
+      : exception instanceof Prisma.PrismaClientInitializationError ? 'DATABASE_INITIALIZATION'
+      : exception instanceof Prisma.PrismaClientValidationError ? 'DATABASE_VALIDATION'
+      : exception instanceof Error ? 'APPLICATION' : 'UNKNOWN';
+    if (status >= 500) console.error(JSON.stringify({level: 'error', requestId, method: req.method, status, code, errorType, ...(databaseCode ? {databaseCode} : {})}));
     res.status(status).json({error: {code, message, requestId, ...(exception instanceof ApiError && exception.retryAfterSeconds ? {retryAfterSeconds: exception.retryAfterSeconds} : {})}});
   }
 }
