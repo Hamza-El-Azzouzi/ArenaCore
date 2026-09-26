@@ -1,4 +1,4 @@
-import {Body, Controller, Get, Inject, Injectable, Param, Patch, Post, Query, Req, UseGuards} from '@nestjs/common';
+import {Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Patch, Post, Query, Req, UseGuards} from '@nestjs/common';
 import {DiscussionStatus, Prisma, Role} from '@prisma/client';
 import {z} from 'zod';
 import {AuthenticatedRequest, SessionGuard} from '../auth/session';
@@ -10,6 +10,7 @@ const uuid = z.uuid();
 const cursorQuery = z.strictObject({cursor: uuid.optional()});
 const roleInput = z.strictObject({role: z.enum(['USER', 'ADMIN'])});
 const moderationInput = z.strictObject({status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED'])});
+const publicationInput=z.strictObject({published:z.boolean()});
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100);
 const testFileName=z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).refine(name=>!['Solution.java','Solution.class','solution.py','solution.js'].includes(name)&&!name.endsWith('.class'),'Reserved or unsafe input filename');
 const testFile=z.strictObject({name:testFileName,content:z.string().max(64_000)});
@@ -86,8 +87,15 @@ export class AdminService {
   }
 
   async problems() {
-    const rows=await this.db.problem.findMany({select:{id:true,slug:true,createdAt:true,currentVersion:{select:{number:true,title:true,difficulty:true,tags:true,published:true,_count:{select:{executions:true}}}},versions:{orderBy:{number:'desc'},take:1,select:{number:true,title:true,difficulty:true,tags:true,published:true,_count:{select:{executions:true}}}}},orderBy:{createdAt:'desc'}});
-    return {items:rows.map(row=>{const version=row.currentVersion??row.versions[0];return {id:row.id,slug:row.slug,createdAt:row.createdAt.toISOString(),version:version??null};})};
+    const rows=await this.db.problem.findMany({select:{id:true,slug:true,createdAt:true,currentVersion:{select:{id:true,number:true,title:true,difficulty:true,tags:true,published:true,_count:{select:{executions:true}}}},versions:{orderBy:{number:'desc'},take:1,select:{id:true,number:true,title:true,difficulty:true,tags:true,published:true,_count:{select:{executions:true}}}}},orderBy:{createdAt:'desc'}});
+    return {items:rows.map(row=>{const version=row.versions[0]??row.currentVersion;return {id:row.id,slug:row.slug,createdAt:row.createdAt.toISOString(),version:version?{...version,published:row.currentVersion?.id===version.id}:null};})};
+  }
+
+  async problem(id:string) {
+    const row=await this.db.problem.findUnique({where:{id},select:{id:true,slug:true,currentVersionId:true,versions:{orderBy:{number:'desc'},take:1,select:{id:true,number:true,published:true,title:true,difficulty:true,tags:true,statementMarkdown:true,constraints:true,timeMs:true,memoryKiB:true,inputMode:true,templates:true,testCases:{orderBy:{ordinal:'asc'},select:{id:true,visibility:true,input:true,expectedOutput:true,files:{orderBy:{name:'asc'},select:{name:true,content:true}}}}}}}});
+    if(!row||!row.versions[0])throw new ApiError(404,'NOT_FOUND','Problem not found.');
+    const version=row.versions[0];
+    return {id:row.id,slug:row.slug,currentVersionId:row.currentVersionId,version:{...version,templates:version.templates}};
   }
 
   async moderation() {
@@ -127,6 +135,46 @@ export class AdminService {
     } catch(error) {if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002')throw new ApiError(409,'SLUG_TAKEN','That problem slug is already in use.');throw error;}
   }
 
+  async editProblem(actorId:string,id:string,input:z.infer<typeof createProblemInput>) {
+    const problem=await this.db.problem.findUnique({where:{id},select:{id:true,slug:true,versions:{orderBy:{number:'desc'},take:1,select:{number:true}}}});
+    if(!problem)throw new ApiError(404,'NOT_FOUND','Problem not found.');
+    if(problem.slug!==input.slug)throw new ApiError(409,'SLUG_IMMUTABLE','A problem slug cannot change after creation.');
+    return this.db.$transaction(async tx=>{
+      await tx.$queryRaw`SELECT id FROM "Problem" WHERE id=${id}::uuid FOR UPDATE`;
+      const latest=await tx.problemVersion.findFirst({where:{problemId:id},orderBy:{number:'desc'},select:{number:true}});
+      const version=await tx.problemVersion.create({data:{problemId:id,number:(latest?.number??0)+1,title:input.title,difficulty:input.difficulty,tags:[...new Set(input.tags)],statementMarkdown:input.statementMarkdown,constraints:input.constraints,timeMs:input.timeMs,memoryKiB:input.memoryKiB,inputMode:input.inputMode,templates:input.templates,published:false}});
+      for(const [index,test] of input.tests.entries())await tx.testCase.create({data:{problemVersionId:version.id,ordinal:index+1,visibility:test.visibility,input:test.input,expectedOutput:test.expectedOutput,files:{create:test.files}}});
+      if(input.publish){await tx.problemVersion.update({where:{id:version.id},data:{published:true}});await tx.problem.update({where:{id},data:{currentVersionId:version.id}});}
+      await tx.auditEvent.create({data:{actorId,action:input.publish?'PROBLEM_VERSION_PUBLISH':'PROBLEM_VERSION_DRAFT_CREATE',targetId:id}});
+      return {id,slug:problem.slug,versionId:version.id,published:input.publish};
+    });
+  }
+
+  async setProblemPublication(actorId:string,id:string,published:boolean) {
+    const problem=await this.db.problem.findUnique({where:{id},select:{id:true,currentVersionId:true,versions:{orderBy:{number:'desc'},take:1,select:{id:true,published:true}}}});
+    if(!problem)throw new ApiError(404,'NOT_FOUND','Problem not found.');
+    const latest=problem.versions[0];
+    if(published&&!latest)throw new ApiError(409,'NO_VERSION','The problem has no version to publish.');
+    return this.db.$transaction(async tx=>{
+      if(published&&latest&&!latest.published)await tx.problemVersion.update({where:{id:latest.id},data:{published:true}});
+      await tx.problem.update({where:{id},data:{currentVersionId:published?latest!.id:null}});
+      await tx.auditEvent.create({data:{actorId,action:published?'PROBLEM_PUBLISH':'PROBLEM_UNPUBLISH',targetId:id}});
+      return {id,published,currentVersionId:published?latest!.id:null};
+    });
+  }
+
+  async deleteProblem(actorId:string,id:string) {
+    const problem=await this.db.problem.findUnique({where:{id},select:{id:true,_count:{select:{competitionProblems:true}},versions:{select:{id:true,published:true,_count:{select:{executions:true}}}}}});
+    if(!problem)throw new ApiError(404,'NOT_FOUND','Problem not found.');
+    if(problem._count.competitionProblems||problem.versions.some(version=>version.published||version._count.executions))throw new ApiError(409,'PROBLEM_IN_USE','Unpublish this problem instead because published or historical records reference it.');
+    await this.db.$transaction(async tx=>{await tx.problem.update({where:{id},data:{currentVersionId:null}});await tx.testCase.deleteMany({where:{problemVersion:{problemId:id}}});await tx.problemVersion.deleteMany({where:{problemId:id}});await tx.problem.delete({where:{id}});await tx.auditEvent.create({data:{actorId,action:'PROBLEM_DELETE',targetId:id}});});
+    return {deleted:true};
+  }
+
+  async setCompetitionPublication(actorId:string,id:string,published:boolean){const competition=await this.db.competition.findUnique({where:{id},select:{id:true}});if(!competition)throw new ApiError(404,'NOT_FOUND','Competition not found.');const updated=await this.db.competition.update({where:{id},data:{published},select:{id:true,slug:true,published:true}});await this.db.auditEvent.create({data:{actorId,action:published?'COMPETITION_PUBLISH':'COMPETITION_UNPUBLISH',targetId:id}});return updated;}
+
+  async deleteCompetition(actorId:string,id:string){const competition=await this.db.competition.findUnique({where:{id},select:{id:true,rounds:{select:{_count:{select:{executions:true}}}}}});if(!competition)throw new ApiError(404,'NOT_FOUND','Competition not found.');if(competition.rounds.some(round=>round._count.executions))throw new ApiError(409,'COMPETITION_IN_USE','Unpublish this competition instead because submission history references it.');await this.db.$transaction(async tx=>{await tx.competition.delete({where:{id}});await tx.auditEvent.create({data:{actorId,action:'COMPETITION_DELETE',targetId:id}});});return {deleted:true};}
+
   async createCompetition(actorId:string,input:z.infer<typeof createCompetitionInput>) {
     const startsAt=new Date(input.startsAt),endsAt=new Date(input.endsAt);
     if(endsAt<=startsAt)throw new ApiError(400,'INVALID_SCHEDULE','Competition end must be after its start.');
@@ -149,10 +197,16 @@ export class AdminController {
   @Get('users') users(@Query() query:unknown){return this.admin.users(validate(cursorQuery,query).cursor);}
   @Get('submissions') submissions(@Query() query:unknown){return this.admin.submissions(validate(cursorQuery,query).cursor);}
   @Get('problems') problems(){return this.admin.problems();}
+  @Get('problems/:id') problem(@Param('id') id:string){return this.admin.problem(validate(uuid,id));}
   @Get('moderation') moderation(){return this.admin.moderation();}
   @Get('competitions') competitions(){return this.admin.competitions();}
   @Patch('users/:id/role') setRole(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setRole(req.principal.userId,validate(uuid,id),validate(roleInput,body).role);}
   @Patch('discussions/:id/status') moderate(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.moderate(req.principal.userId,validate(uuid,id),validate(moderationInput,body).status);}
   @Post('problems') createProblem(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.admin.createProblem(req.principal.userId,validate(createProblemInput,body));}
+  @Patch('problems/:id') editProblem(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.editProblem(req.principal.userId,validate(uuid,id),validate(createProblemInput,body));}
+  @Patch('problems/:id/publication') setProblemPublication(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setProblemPublication(req.principal.userId,validate(uuid,id),validate(publicationInput,body).published);}
+  @Delete('problems/:id') @HttpCode(200) deleteProblem(@Req() req:AuthenticatedRequest,@Param('id') id:string){return this.admin.deleteProblem(req.principal.userId,validate(uuid,id));}
   @Post('competitions') createCompetition(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.admin.createCompetition(req.principal.userId,validate(createCompetitionInput,body));}
+  @Patch('competitions/:id/publication') setCompetitionPublication(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setCompetitionPublication(req.principal.userId,validate(uuid,id),validate(publicationInput,body).published);}
+  @Delete('competitions/:id') @HttpCode(200) deleteCompetition(@Req() req:AuthenticatedRequest,@Param('id') id:string){return this.admin.deleteCompetition(req.principal.userId,validate(uuid,id));}
 }

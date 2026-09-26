@@ -127,6 +127,14 @@ integration('real PostgreSQL API integration', () => {
     const created=await json<{id:string;slug:string;kind:string}>(await request('/competitions',{method:'POST',body:JSON.stringify({slug:`community-${crypto.randomUUID()}`,kind:'CONTEST',title:'Community Integration Contest',description:'A user-owned event created through the public API.',rulesMarkdown:'Highest score wins this carefully bounded event.',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),rounds:[{title:'Main round',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),problemSlugs:['sum-two-numbers']}]})}));
     expect(created.kind).toBe('CONTEST');
     expect(await db.competition.findUniqueOrThrow({where:{id:created.id},select:{ownerId:true}})).toMatchObject({ownerId});
+    expect(await json(await request('/competitions/mine'))).toMatchObject({items:[expect.objectContaining({id:created.id})]});
+    expect((await request(`/competitions/${created.slug}/manage`,{},true)).status).toBe(403);
+    expect(await json(await request(`/competitions/${created.slug}/registrations`))).toMatchObject({items:[expect.objectContaining({joinedAt:expect.any(String)})]});
+    expect(await json(await request(`/competitions/${created.slug}/submissions`))).toMatchObject({items:[]});
+    expect(await json(await request(`/competitions/${created.slug}/manage/leaderboard`))).toMatchObject({items:[expect.objectContaining({score:0})]});
+    const updatedStarts=new Date(Date.now()+12*60_000),updatedEnds=new Date(Date.now()+80*60_000);
+    expect((await request(`/competitions/${created.slug}`,{method:'PATCH',body:JSON.stringify({slug:created.slug,kind:'CONTEST',title:'Updated Community Contest',description:'The owner updated this event before its start.',rulesMarkdown:'Highest score still wins this bounded event.',startsAt:updatedStarts.toISOString(),endsAt:updatedEnds.toISOString(),rounds:[{title:'Updated round',startsAt:updatedStarts.toISOString(),endsAt:updatedEnds.toISOString(),problemSlugs:['sum-two-numbers']}]})})).status).toBe(200);
+    expect((await json<{title:string}>(await request(`/competitions/${created.slug}/manage`))).title).toBe('Updated Community Contest');
     expect((await request('/executions',{method:'POST',headers:{'idempotency-key':'future-competition-job'},body:JSON.stringify({...input,competitionSlug:created.slug})})).status).toBe(409);
     await db.auditEvent.deleteMany({where:{targetId:created.id}});
     await db.competition.delete({where:{id:created.id}});
@@ -247,11 +255,12 @@ integration('real PostgreSQL API integration', () => {
     const problemSlug=`draft-${crypto.randomUUID()}`;
     const created=await json<{id:string;published:boolean}>(await request('/admin/problems',{method:'POST',body:JSON.stringify({slug:problemSlug,title:'Integration Draft Problem',difficulty:'EASY',tags:['integration'],statementMarkdown:'Read the input and produce the required deterministic output.',constraints:['Input is bounded.'],timeMs:1000,memoryKiB:65536,templates:{java:'class Solution {}',python:'# solution',javascript:'// solution'},tests:[{visibility:'PUBLIC',input:'1\n',expectedOutput:'1\n'},{visibility:'HIDDEN',input:'2\n',expectedOutput:'2\n'}],publish:false})}));
     expect(created.published).toBe(false);
-    const versions=await db.problemVersion.findMany({where:{problemId:created.id},select:{id:true}});
-    await db.testCase.deleteMany({where:{problemVersionId:{in:versions.map(version=>version.id)}}});
-    await db.problemVersion.deleteMany({where:{problemId:created.id}});
-    await db.auditEvent.deleteMany({where:{targetId:created.id}});
-    await db.problem.delete({where:{id:created.id}});
+    expect(await json(await request(`/admin/problems/${created.id}`))).toMatchObject({slug:problemSlug,version:{number:1}});
+    const edited=await json<{versionId:string;published:boolean}>(await request(`/admin/problems/${created.id}`,{method:'PATCH',body:JSON.stringify({slug:problemSlug,title:'Edited Integration Draft',difficulty:'MEDIUM',tags:['integration'],statementMarkdown:'This edited version remains immutable after publication.',constraints:['Input remains bounded.'],timeMs:1200,memoryKiB:65536,templates:{java:'class Solution {}',python:'# solution',javascript:'// solution'},tests:[{visibility:'PUBLIC',input:'1\n',expectedOutput:'1\n'},{visibility:'HIDDEN',input:'2\n',expectedOutput:'2\n'}],publish:false})}));
+    expect(edited.published).toBe(false);
+    expect(await json(await request(`/admin/problems/${created.id}/publication`,{method:'PATCH',body:JSON.stringify({published:true})}))).toMatchObject({published:true,currentVersionId:edited.versionId});
+    expect((await request(`/admin/problems/${created.id}/publication`,{method:'PATCH',body:JSON.stringify({published:false})})).status).toBe(200);
+    expect((await request(`/admin/problems/${created.id}`,{method:'DELETE'})).status).toBe(409);
     const fileProblemSlug=`file-${crypto.randomUUID()}`;
     const fileProblem=await json<{id:string;versionId:string;published:boolean}>(await request('/admin/problems',{method:'POST',body:JSON.stringify({slug:fileProblemSlug,title:'File Input Integration Problem',difficulty:'MEDIUM',tags:['files'],statementMarkdown:'Read values from the declared input text file and print their sum.',constraints:['The file contains two bounded integers.'],timeMs:1000,memoryKiB:65536,inputMode:'FILES',templates:{java:'// read input.txt',python:'open("input.txt")',javascript:'readFileSync("input.txt")'},tests:[{visibility:'PUBLIC',input:'',files:[{name:'input.txt',content:'1 2\n'}],expectedOutput:'3\n'},{visibility:'HIDDEN',input:'',files:[{name:'secret.txt',content:'PRIVATE_FILE_CONTENT'}],expectedOutput:'7\n'}],publish:true})}));
     expect(fileProblem.published).toBe(true);
@@ -266,8 +275,8 @@ integration('real PostgreSQL API integration', () => {
     expect(competition.published).toBe(false);
     const competitions=await json<{items:Array<{id:string}>}>(await request('/admin/competitions'));
     expect(competitions.items).toContainEqual(expect.objectContaining({id:competition.id}));
-    await db.auditEvent.deleteMany({where:{targetId:competition.id}});
-    await db.competition.delete({where:{id:competition.id}});
+    expect(await json(await request(`/admin/competitions/${competition.id}/publication`,{method:'PATCH',body:JSON.stringify({published:true})}))).toMatchObject({published:true});
+    expect((await request(`/admin/competitions/${competition.id}`,{method:'DELETE'})).status).toBe(200);
   });
   it('execution switch fails closed and logout revokes the session', async () => {
     app.get(Config).values.EXECUTIONS_ENABLED = 'false';
