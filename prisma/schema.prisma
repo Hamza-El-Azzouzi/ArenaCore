@@ -58,6 +58,10 @@ enum DiscussionStatus {
   HIDDEN
   DELETED
 }
+enum CompetitionKind {
+  CONTEST
+  TOURNAMENT
+}
 model User {
   id           String      @id @default(uuid()) @db.Uuid
   issuer       String
@@ -75,6 +79,7 @@ model User {
   discussionPosts DiscussionPost[]
   discussionLikes DiscussionLike[]
   discussionRateLimit DiscussionRateLimit?
+  competitionRegistrations CompetitionRegistration[]
   @@unique([issuer, subject])
 }
 model Session {
@@ -96,7 +101,61 @@ model Problem {
   currentVersion ProblemVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id])
   versions   ProblemVersion[] @relation("ProblemVersions")
   discussionPosts DiscussionPost[]
+  competitionProblems CompetitionProblem[]
   createdAt  DateTime         @default(now())
+}
+
+model Competition {
+  id            String                    @id @default(uuid()) @db.Uuid
+  slug          String                    @unique
+  kind          CompetitionKind
+  title         String
+  description   String
+  rulesMarkdown String
+  prizeLabel    String?
+  startsAt      DateTime
+  endsAt        DateTime
+  published     Boolean                   @default(false)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  rounds        CompetitionRound[]
+  registrations CompetitionRegistration[]
+  @@index([kind, published, startsAt])
+}
+
+model CompetitionRound {
+  id            String               @id @default(uuid()) @db.Uuid
+  competitionId String               @db.Uuid
+  competition   Competition          @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  title         String
+  ordinal       Int
+  startsAt      DateTime
+  endsAt        DateTime
+  problems      CompetitionProblem[]
+  @@unique([competitionId, ordinal])
+  @@index([competitionId, startsAt])
+}
+
+model CompetitionProblem {
+  roundId  String           @db.Uuid
+  round    CompetitionRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  problemId String          @db.Uuid
+  problem  Problem          @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  ordinal  Int
+  points   Int              @default(100)
+  @@id([roundId, problemId])
+  @@unique([roundId, ordinal])
+  @@index([problemId])
+}
+
+model CompetitionRegistration {
+  competitionId String      @db.Uuid
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  userId        String      @db.Uuid
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt      DateTime    @default(now())
+  @@id([competitionId, userId])
+  @@index([userId, joinedAt])
 }
 model ProblemVersion {
   id                String         @id @default(uuid()) @db.Uuid
