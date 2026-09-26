@@ -19,6 +19,7 @@ export const createExecutionSchema = z.strictObject({
   language: languageSchema,
   mode: modeSchema,
   sourceCode: z.string().min(1).refine(value => new TextEncoder().encode(value).byteLength <= MAX_SOURCE_BYTES, 'Source exceeds 64 KiB'),
+  competitionSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100).optional(),
 });
 export const idempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 export const uuidSchema = z.uuid();

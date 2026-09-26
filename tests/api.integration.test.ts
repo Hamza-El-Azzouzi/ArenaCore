@@ -114,9 +114,17 @@ integration('real PostgreSQL API integration', () => {
     expect(JSON.stringify(detail)).not.toContain('expectedOutput');
     expect((await request('/competitions/weekend-sprint/register', {method:'POST'})).status).toBe(200);
     expect((await request('/competitions/weekend-sprint/register', {method:'POST'})).status).toBe(200);
+    expect(await json(await request('/competitions/weekend-sprint/registration'))).toMatchObject({registered:true});
     const board = await json<{items:Array<{username:string;score:number}>}>(await request('/competitions/weekend-sprint/leaderboard', {headers:{cookie:''}}));
     expect(board.items).toContainEqual(expect.objectContaining({score:0}));
     expect(JSON.stringify(board)).not.toContain('sourceCode');
+    const startsAt=new Date(Date.now()+10*60_000),endsAt=new Date(Date.now()+70*60_000);
+    const created=await json<{id:string;slug:string;kind:string}>(await request('/competitions',{method:'POST',body:JSON.stringify({slug:`community-${crypto.randomUUID()}`,kind:'CONTEST',title:'Community Integration Contest',description:'A user-owned event created through the public API.',rulesMarkdown:'Highest score wins this carefully bounded event.',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),rounds:[{title:'Main round',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),problemSlugs:['sum-two-numbers']}]})}));
+    expect(created.kind).toBe('CONTEST');
+    expect(await db.competition.findUniqueOrThrow({where:{id:created.id},select:{ownerId:true}})).toMatchObject({ownerId});
+    expect((await request('/executions',{method:'POST',headers:{'idempotency-key':'future-competition-job'},body:JSON.stringify({...input,competitionSlug:created.slug})})).status).toBe(409);
+    await db.auditEvent.deleteMany({where:{targetId:created.id}});
+    await db.competition.delete({where:{id:created.id}});
   });
   it('updates and serves a safe public profile', async () => {
     const username = `learner_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
