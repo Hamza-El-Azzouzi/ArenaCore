@@ -99,11 +99,24 @@ integration('real PostgreSQL API integration', () => {
     expect((await request('/executions', {method: 'POST', body: JSON.stringify(input), headers: {origin: 'https://evil.example', 'idempotency-key': key}})).status).toBe(403);
   });
   it('returns stable CSRF tokens across me calls', async () => {
-    const first = await json<{csrfToken: string; user: {username: string}}>(await request('/me'));
+    const first = await json<{csrfToken: string; user: {username: string; role: string}}>(await request('/me'));
     const second = await json<{csrfToken: string}>(await request('/me'));
     expect(first.csrfToken).toBe(csrf);
     expect(second.csrfToken).toBe(csrf);
     expect(first.user.username).toMatch(/^user_[a-f0-9]{32}$/);
+    expect(first.user.role).toBe('USER');
+  });
+  it('serves published competitions, registers once and returns a safe scoreboard', async () => {
+    const catalog = await json<{items: Array<{slug:string;kind:string}>}>(await request('/competitions?kind=CONTEST', {headers:{cookie:''}}));
+    expect(catalog.items).toContainEqual(expect.objectContaining({slug:'weekend-sprint',kind:'CONTEST'}));
+    const detail = await json<{rounds:Array<{problems:Array<{id:string}>}>}>(await request('/competitions/weekend-sprint', {headers:{cookie:''}}));
+    expect(detail.rounds[0]?.problems).toContainEqual(expect.objectContaining({id:sampleProblemId}));
+    expect(JSON.stringify(detail)).not.toContain('expectedOutput');
+    expect((await request('/competitions/weekend-sprint/register', {method:'POST'})).status).toBe(200);
+    expect((await request('/competitions/weekend-sprint/register', {method:'POST'})).status).toBe(200);
+    const board = await json<{items:Array<{username:string;score:number}>}>(await request('/competitions/weekend-sprint/leaderboard', {headers:{cookie:''}}));
+    expect(board.items).toContainEqual(expect.objectContaining({score:0}));
+    expect(JSON.stringify(board)).not.toContain('sourceCode');
   });
   it('updates and serves a safe public profile', async () => {
     const username = `learner_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -206,6 +219,34 @@ integration('real PostgreSQL API integration', () => {
       await db.session.create({data: {userId: ownerId, tokenHash: secrets.tokenHash, csrfTokenHash: secrets.csrfTokenHash, expiresAt: new Date(Date.now() + (revoked ? 60000 : -1000)), revokedAt: revoked ? new Date() : null}});
       expect((await request('/submissions', {headers: {cookie: `arenacore_session=${secrets.token}`}})).status).toBe(401);
     }
+  });
+  it('protects admin data by role and exposes only safe operational projections', async () => {
+    expect((await request('/admin/overview')).status).toBe(403);
+    await db.user.update({where:{id:ownerId},data:{role:'ADMIN'}});
+    const me = await json<{user:{role:string}}>(await request('/me'));
+    expect(me.user.role).toBe('ADMIN');
+    const overview = await json<{stats:{users:number};recentSubmissions:unknown[]}>(await request('/admin/overview'));
+    expect(overview.stats.users).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(overview)).not.toContain('sourceCode');
+    const users = await json<{items:Array<{id:string;role:string}>}>(await request('/admin/users'));
+    expect(users.items).toContainEqual(expect.objectContaining({id:ownerId,role:'ADMIN'}));
+    expect((await request(`/admin/users/${ownerId}/role`, {method:'PATCH',body:JSON.stringify({role:'USER'})})).status).toBe(409);
+    const problemSlug=`draft-${crypto.randomUUID()}`;
+    const created=await json<{id:string;published:boolean}>(await request('/admin/problems',{method:'POST',body:JSON.stringify({slug:problemSlug,title:'Integration Draft Problem',difficulty:'EASY',tags:['integration'],statementMarkdown:'Read the input and produce the required deterministic output.',constraints:['Input is bounded.'],timeMs:1000,memoryKiB:65536,templates:{java:'class Solution {}',python:'# solution',javascript:'// solution'},tests:[{visibility:'PUBLIC',input:'1\n',expectedOutput:'1\n'},{visibility:'HIDDEN',input:'2\n',expectedOutput:'2\n'}],publish:false})}));
+    expect(created.published).toBe(false);
+    const versions=await db.problemVersion.findMany({where:{problemId:created.id},select:{id:true}});
+    await db.testCase.deleteMany({where:{problemVersionId:{in:versions.map(version=>version.id)}}});
+    await db.problemVersion.deleteMany({where:{problemId:created.id}});
+    await db.auditEvent.deleteMany({where:{targetId:created.id}});
+    await db.problem.delete({where:{id:created.id}});
+    const competitionSlug=`competition-${crypto.randomUUID()}`;
+    const startsAt=new Date(Date.now()+3_600_000),endsAt=new Date(Date.now()+7_200_000);
+    const competition=await json<{id:string;published:boolean}>(await request('/admin/competitions',{method:'POST',body:JSON.stringify({slug:competitionSlug,kind:'CONTEST',title:'Integration Contest',description:'A safely created integration contest.',rulesMarkdown:'Highest score wins this integration contest.',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),published:false,rounds:[{title:'Main round',startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),problemSlugs:['sum-two-numbers']}]})}));
+    expect(competition.published).toBe(false);
+    const competitions=await json<{items:Array<{id:string}>}>(await request('/admin/competitions'));
+    expect(competitions.items).toContainEqual(expect.objectContaining({id:competition.id}));
+    await db.auditEvent.deleteMany({where:{targetId:competition.id}});
+    await db.competition.delete({where:{id:competition.id}});
   });
   it('execution switch fails closed and logout revokes the session', async () => {
     app.get(Config).values.EXECUTIONS_ENABLED = 'false';
