@@ -34,7 +34,7 @@ describe('OIDC configuration and login proof encryption', () => {
     expect(parsed.API_ORIGIN).toBe('https://api.example');
   });
   it('encrypts with random IVs and authenticates ciphertext, key and state binding', () => {
-    const key = randomBytes(32), state = 'a'.repeat(64), proof = {verifier: token(), nonce: token()};
+    const key = randomBytes(32), state = 'a'.repeat(64), proof = {provider: 'auth0' as const, verifier: token(), nonce: token()};
     const first = encryptProof(key, state, proof), second = encryptProof(key, state, proof);
     expect(first).not.toBe(second);
     expect(first).not.toContain(proof.verifier);

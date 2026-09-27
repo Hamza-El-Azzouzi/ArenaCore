@@ -230,7 +230,7 @@ integration('OIDC protocol and session integration', () => {
   });
   it('rejects unsafe discovery and recovers after a provider outage', async () => {
     const gateway = new FixtureGateway(config, provider);
-    const proof = {verifier: randomBytes(32).toString('base64url'), nonce: randomBytes(32).toString('base64url')};
+    const proof = {provider: 'auth0' as const, verifier: randomBytes(32).toString('base64url'), nonce: randomBytes(32).toString('base64url')};
     const state = randomBytes(32).toString('base64url');
     provider.failDiscovery = true;
     await expect(gateway.authorizationUrl(state, proof)).rejects.toThrow('temporarily unavailable');
