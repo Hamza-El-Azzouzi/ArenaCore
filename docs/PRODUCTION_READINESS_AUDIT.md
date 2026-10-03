@@ -12,6 +12,7 @@ This file tracks the end-to-end completion audit. A feature is complete only whe
 - Application/runner deployment automation, encrypted off-host backups, restore drill, and separate network boundaries.
 - Account self-service: avatar URL, profile privacy, persisted theme and notification preferences, native email/password changes, active-session revocation, and anonymizing deactivation.
 - Moderation foundation: distinct moderator authorization, user discussion reports, ownership-safe report history, required review notes, resolution audit records, timed suspensions, bans, session revocation, and centralized restriction enforcement.
+- Production frontend paths: mock sessions/data/executions are removed; admin analytics use bounded database aggregates with CSV export; unsupported decorative admin settings/invitation forms redirect to working account and user management screens.
 
 ## Remaining production work
 
@@ -22,9 +23,6 @@ This file tracks the end-to-end completion audit. A feature is complete only whe
 
 ### P0 — remove prototype paths
 
-- Remove `NEXT_PUBLIC_USE_MOCK_API`, `lib/api/mock-data.ts`, simulated executions, and all production-reachable mock branches.
-- Replace the hardcoded admin analytics page with database-derived, bounded metrics and a real export endpoint.
-- Replace or remove the decorative admin settings and invite-user pages. Every visible control must persist or perform a real action.
 - Audit every visible button and navigation target using browser end-to-end tests.
 
 ### P1 — user engagement

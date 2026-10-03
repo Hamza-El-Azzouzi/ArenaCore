@@ -42,7 +42,7 @@ The supplied PDF references an earlier sandbox security specification that is ab
 - [Copy-ready Bolt frontend prompt](docs/prompts/BOLT_PROMPT.md)
 - [Frontend repository](https://github.com/Hamza-El-Azzouzi/arenaCore-frontend)
 
-The generated UI now lives in the separate frontend repository. Its core problem, workspace, identity, execution and history routes use the backend contract; unsupported generated product screens return 404. Demo results remain clearly labelled simulations, while actual judging belongs to the isolated backend.
+The generated UI now lives in the separate frontend repository. Its problem, workspace, identity, execution, history, profile, discussion, competition, moderation, and administrator routes use backend contracts. Mock sessions, data, and execution simulations have been removed; judging belongs exclusively to the isolated backend.
 
 ## Learn the backend and NestJS
 

@@ -286,6 +286,16 @@ integration('real PostgreSQL API integration', () => {
     const overview = await json<{stats:{users:number};recentSubmissions:unknown[]}>(await request('/admin/overview'));
     expect(overview.stats.users).toBeGreaterThanOrEqual(2);
     expect(JSON.stringify(overview)).not.toContain('sourceCode');
+    const analytics=await json<{period:{days:number};stats:{submissions:number;accepted:number;activeUsers:number};daily:Array<{date:string;submissions:number}>;topProblems:unknown[]}>(await request('/admin/analytics?days=30'));
+    expect(analytics.period.days).toBe(30);
+    expect(analytics.daily).toHaveLength(30);
+    expect(analytics.stats.submissions).toBeGreaterThanOrEqual(analytics.stats.accepted);
+    expect(JSON.stringify(analytics)).not.toMatch(/sourceCode|expectedOutput|passwordHash|issuer/);
+    const exported=await json<{filename:string;contentType:string;content:string}>(await request('/admin/analytics/export?days=7'));
+    expect(exported).toMatchObject({contentType:'text/csv'});
+    expect(exported.filename).toMatch(/^arenacore-analytics-.*\.csv$/);
+    expect(exported.content.split('\n')[0]).toBe('"date","submissions","accepted","active_users"');
+    expect((await request('/admin/analytics?days=365')).status).toBe(400);
     const users = await json<{items:Array<{id:string;role:string}>}>(await request('/admin/users'));
     expect(users.items).toContainEqual(expect.objectContaining({id:ownerId,role:'ADMIN'}));
     expect((await request(`/admin/users/${ownerId}/role`, {method:'PATCH',body:JSON.stringify({role:'USER'})})).status).toBe(409);

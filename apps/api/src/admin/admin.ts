@@ -8,6 +8,7 @@ import {Database} from '../database/database';
 
 const uuid = z.uuid();
 const cursorQuery = z.strictObject({cursor: uuid.optional()});
+const analyticsQuery=z.strictObject({days:z.coerce.number().int().refine(value=>[7,30,90].includes(value),'Choose a 7, 30, or 90 day period.').default(30)});
 const userQuery=z.strictObject({cursor:uuid.optional(),search:z.string().trim().min(2).max(100).optional(),role:z.enum(['USER','MODERATOR','ADMIN']).optional(),restriction:z.enum(['ACTIVE','SUSPENDED','BANNED']).optional()});
 const roleInput = z.strictObject({role: z.enum(['USER', 'MODERATOR','ADMIN'])});
 const moderationInput = z.strictObject({status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED'])});
@@ -75,6 +76,32 @@ export class AdminService {
       this.db.execution.findMany({where: {mode: 'SUBMIT'}, select: {id:true, language:true, state:true, verdict:true, runtimeMs:true, createdAt:true, user:{select:{username:true,displayName:true}}, problemVersion:{select:{title:true,problem:{select:{slug:true}}}}}, orderBy:[{createdAt:'desc'},{id:'desc'}], take:8}),
     ]);
     return {stats: {users, submissionsToday, publishedProblems, moderationPending, activeExecutions}, recentSubmissions: recent.map(row => ({id:row.id, language:row.language, state:row.state, verdict:row.verdict, runtimeMs:row.runtimeMs, createdAt:row.createdAt.toISOString(), user:row.user, problem:{slug:row.problemVersion.problem.slug,title:row.problemVersion.title}}))};
+  }
+
+  async analytics(days:number) {
+    const until=new Date();
+    const since=new Date(Date.UTC(until.getUTCFullYear(),until.getUTCMonth(),until.getUTCDate()-days+1));
+    type DailyRow={date:string;submissions:number;accepted:number;activeUsers:number};
+    type ActiveRow={count:number};
+    type ProblemRow={slug:string;title:string;submissions:number;accepted:number};
+    const [newUsers,submissions,accepted,activeRows,dailyRows,problemRows]=await Promise.all([
+      this.db.user.count({where:{createdAt:{gte:since}}}),
+      this.db.execution.count({where:{mode:'SUBMIT',createdAt:{gte:since}}}),
+      this.db.execution.count({where:{mode:'SUBMIT',verdict:'ACCEPTED',createdAt:{gte:since}}}),
+      this.db.$queryRaw<ActiveRow[]>`SELECT COUNT(DISTINCT "userId")::int AS count FROM "Execution" WHERE mode='SUBMIT'::"ExecutionMode" AND "createdAt">=${since}`,
+      this.db.$queryRaw<DailyRow[]>`SELECT to_char(date_trunc('day',e."createdAt"),'YYYY-MM-DD') AS date, COUNT(*)::int AS submissions, COUNT(*) FILTER (WHERE e.verdict='ACCEPTED'::"Verdict")::int AS accepted, COUNT(DISTINCT e."userId")::int AS "activeUsers" FROM "Execution" e WHERE e.mode='SUBMIT'::"ExecutionMode" AND e."createdAt">=${since} GROUP BY date_trunc('day',e."createdAt") ORDER BY date_trunc('day',e."createdAt")`,
+      this.db.$queryRaw<ProblemRow[]>`SELECT p.slug,(array_agg(pv.title ORDER BY e."createdAt" DESC))[1] AS title,COUNT(*)::int AS submissions,COUNT(*) FILTER (WHERE e.verdict='ACCEPTED'::"Verdict")::int AS accepted FROM "Execution" e JOIN "ProblemVersion" pv ON pv.id=e."problemVersionId" JOIN "Problem" p ON p.id=pv."problemId" WHERE e.mode='SUBMIT'::"ExecutionMode" AND e."createdAt">=${since} GROUP BY p.id,p.slug ORDER BY submissions DESC,p.slug ASC LIMIT 10`,
+    ]);
+    const byDate=new Map(dailyRows.map(row=>[row.date,row]));
+    const daily=Array.from({length:days},(_,offset)=>{const date=new Date(since);date.setUTCDate(since.getUTCDate()+offset);const key=date.toISOString().slice(0,10);return byDate.get(key)??{date:key,submissions:0,accepted:0,activeUsers:0};});
+    return {period:{days,since:since.toISOString(),until:until.toISOString()},stats:{newUsers,submissions,accepted,activeUsers:activeRows[0]?.count??0,successRate:submissions?Math.round(accepted*1000/submissions)/10:0},daily,topProblems:problemRows.map(row=>({...row,successRate:row.submissions?Math.round(row.accepted*1000/row.submissions)/10:0}))};
+  }
+
+  async analyticsExport(days:number) {
+    const report=await this.analytics(days);
+    const quote=(value:string|number)=>`"${String(value).replaceAll('"','""')}"`;
+    const rows=[['date','submissions','accepted','active_users'],...report.daily.map(row=>[row.date,row.submissions,row.accepted,row.activeUsers])];
+    return {filename:`arenacore-analytics-${report.period.since.slice(0,10)}-${report.period.until.slice(0,10)}.csv`,contentType:'text/csv',content:rows.map(row=>row.map(quote).join(',')).join('\n')+'\n'};
   }
 
   async users(query:z.infer<typeof userQuery>) {
@@ -224,6 +251,8 @@ export class AdminService {
 export class AdminController {
   constructor(@Inject(AdminService) private readonly admin:AdminService){}
   @Get('overview') overview(){return this.admin.overview();}
+  @Get('analytics') analytics(@Query() query:unknown){return this.admin.analytics(validate(analyticsQuery,query).days);}
+  @Get('analytics/export') analyticsExport(@Query() query:unknown){return this.admin.analyticsExport(validate(analyticsQuery,query).days);}
   @Get('users') users(@Query() query:unknown){return this.admin.users(validate(userQuery,query));}
   @Get('submissions') submissions(@Query() query:unknown){return this.admin.submissions(validate(cursorQuery,query).cursor);}
   @Get('problems') problems(){return this.admin.problems();}
