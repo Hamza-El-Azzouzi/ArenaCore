@@ -9,6 +9,15 @@ enum Role {
   USER
   ADMIN
 }
+enum ProfileVisibility {
+  PUBLIC
+  PRIVATE
+}
+enum ThemePreference {
+  SYSTEM
+  DARK
+  LIGHT
+}
 enum Difficulty {
   EASY
   MEDIUM
@@ -75,6 +84,12 @@ model User {
   bio          String?
   location     String?
   website      String?
+  avatarUrl    String?
+  profileVisibility ProfileVisibility @default(PUBLIC)
+  themePreference ThemePreference @default(SYSTEM)
+  productNotifications Boolean @default(true)
+  competitionNotifications Boolean @default(true)
+  deactivatedAt DateTime?
   role         Role        @default(USER)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt

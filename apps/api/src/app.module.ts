@@ -8,8 +8,9 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { DiscussionsModule } from './discussions/discussions.module';
 import { AdminModule } from './admin/admin.module';
 import { CompetitionsModule } from './competitions/competitions.module';
+import { AccountModule } from './account/account.module';
 @Module({
-  imports: [DatabaseModule, AuthModule, ExecutionsModule, ProfilesModule, DiscussionsModule, AdminModule, CompetitionsModule],
+  imports: [DatabaseModule, AuthModule, ExecutionsModule, ProfilesModule, DiscussionsModule, AdminModule, CompetitionsModule, AccountModule],
   controllers: [HealthController, ProblemsController],
   providers: [Problems],
 })

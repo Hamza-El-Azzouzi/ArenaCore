@@ -7,6 +7,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createApp } from '../apps/api/src/bootstrap';
 import { Config } from '../apps/api/src/config/config';
 import { newSessionSecrets } from '../apps/api/src/auth/session';
+import {hashPassword} from '../apps/api/src/auth/password';
 import { seed, sampleProblemId, sampleVersionId } from '../prisma/seed';
 
 // Never run destructive setup against DATABASE_URL. Explicitly opt into a disposable DB.
@@ -148,6 +149,33 @@ integration('real PostgreSQL API integration', () => {
     expect(publicProfile).not.toHaveProperty('issuer');
     expect(JSON.stringify(publicProfile)).not.toContain('sourceCode');
     expect((await request('/profiles/me', {method: 'PATCH', body: JSON.stringify({username: 'admin'})})).status).toBe(400);
+  });
+  it('persists account preferences, manages sessions, changes passwords, and safely deactivates',async()=>{
+    const email=`account-${crypto.randomUUID()}@example.test`,oldPassword='correct horse battery staple',newPassword='a newer correct horse battery staple';
+    const account=await db.user.create({data:{issuer:'arenacore:password',subject:email,displayName:'Account Owner',credential:{create:{email,passwordHash:await hashPassword(oldPassword)}}},select:{id:true,username:true}});
+    const first=newSessionSecrets(),second=newSessionSecrets();
+    await db.session.createMany({data:[{userId:account.id,tokenHash:first.tokenHash,csrfTokenHash:first.csrfTokenHash,expiresAt:new Date(Date.now()+600_000)},{userId:account.id,tokenHash:second.tokenHash,csrfTokenHash:second.csrfTokenHash,expiresAt:new Date(Date.now()+600_000)}]});
+    const accountRequest=(path:string,options:RequestInit={})=>fetch(`${base}${path}`,{...options,headers:{cookie:`arenacore_session=${first.token}`,origin,'x-csrf-token':first.csrfToken,'content-type':'application/json',...options.headers}});
+    try{
+      expect(await json(await accountRequest('/account/settings'))).toMatchObject({email,hasPassword:true,profileVisibility:'PUBLIC',themePreference:'SYSTEM'});
+      expect((await accountRequest('/account/settings',{method:'PATCH',body:JSON.stringify({profileVisibility:'PRIVATE',themePreference:'LIGHT',productNotifications:false})})).status).toBe(200);
+      expect((await accountRequest(`/profiles/${account.username}`,{headers:{cookie:''}})).status).toBe(404);
+      expect((await accountRequest('/profiles/me')).status).toBe(200);
+      const active=await json<{items:Array<{id:string;current:boolean}>}>(await accountRequest('/account/sessions'));
+      expect(active.items).toHaveLength(2);expect(active.items.filter(item=>item.current)).toHaveLength(1);
+      expect(await json(await accountRequest('/account/sessions',{method:'DELETE'}))).toMatchObject({revoked:1});
+      expect((await accountRequest('/account/password',{method:'PATCH',body:JSON.stringify({currentPassword:'wrong password value',newPassword})})).status).toBe(401);
+      expect((await accountRequest('/account/password',{method:'PATCH',body:JSON.stringify({currentPassword:oldPassword,newPassword})})).status).toBe(200);
+      const changedEmail=`changed-${crypto.randomUUID()}@example.test`;
+      expect((await accountRequest('/account/email',{method:'PATCH',body:JSON.stringify({currentPassword:newPassword,newEmail:changedEmail})})).status).toBe(200);
+      expect(await db.credential.findUnique({where:{email:changedEmail},select:{user:{select:{subject:true}}}})).toMatchObject({user:{subject:changedEmail}});
+      expect((await accountRequest('/account',{method:'DELETE',body:JSON.stringify({confirmation:'DELETE',currentPassword:newPassword})})).status).toBe(200);
+      const deleted=await db.user.findUniqueOrThrow({where:{id:account.id},select:{displayName:true,deactivatedAt:true,credential:true,sessions:{where:{revokedAt:null}}}});
+      expect(deleted).toMatchObject({displayName:'Deleted user',credential:null,sessions:[]});expect(deleted.deactivatedAt).toBeInstanceOf(Date);
+      expect((await accountRequest('/account/settings')).status).toBe(401);
+    }finally{
+      await db.auditEvent.deleteMany({where:{actorId:account.id}});await db.user.delete({where:{id:account.id}}).catch(()=>undefined);
+    }
   });
   it('creates, lists, replies to and idempotently likes a public discussion', async () => {
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', headers: {cookie: ''}, body: JSON.stringify({title: 'Unauthenticated question', body: 'This must not be accepted.'})})).status).toBe(401);

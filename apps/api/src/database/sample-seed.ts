@@ -44,13 +44,17 @@ export async function seed(db:PrismaClient) {
 }
 
 async function seedCompetitions(tx: Prisma.TransactionClient) {
+  const now=new Date();
   const events=[
-    {id:contestId,roundId:contestRoundId,slug:'weekend-sprint',kind:'CONTEST' as const,title:'Weekend Sprint',description:'A focused timed contest for practicing speed and accuracy.',rulesMarkdown:'Solve the published problems during the event. Highest score wins; ties use the lowest penalty.',prizeLabel:'1,000 XP',startsAt:new Date('2026-09-27T18:00:00Z'),endsAt:new Date('2026-09-27T20:00:00Z'),roundTitle:'Main round'},
-    {id:tournamentId,roundId:tournamentRoundId,slug:'arena-open',kind:'TOURNAMENT' as const,title:'Arena Open',description:'A multi-round tournament that rewards consistent problem solving.',rulesMarkdown:'Register before the final round ends. Scores come from accepted submissions during active tournament rounds.',prizeLabel:'5,000 XP',startsAt:new Date('2026-10-01T18:00:00Z'),endsAt:new Date('2026-10-08T20:00:00Z'),roundTitle:'Qualifier'},
+    {id:contestId,roundId:contestRoundId,slug:'weekend-sprint',kind:'CONTEST' as const,title:'Weekend Sprint',description:'A focused timed contest for practicing speed and accuracy.',rulesMarkdown:'Solve the published problems during the event. Highest score wins; ties use the lowest penalty.',prizeLabel:'1,000 XP',startOffsetDays:7,durationDays:0,roundTitle:'Main round'},
+    {id:tournamentId,roundId:tournamentRoundId,slug:'arena-open',kind:'TOURNAMENT' as const,title:'Arena Open',description:'A multi-round tournament that rewards consistent problem solving.',rulesMarkdown:'Register before the final round ends. Scores come from accepted submissions during active tournament rounds.',prizeLabel:'5,000 XP',startOffsetDays:14,durationDays:7,roundTitle:'Qualifier'},
   ];
   for(const event of events){
-    await tx.competition.upsert({where:{slug:event.slug},create:{id:event.id,slug:event.slug,kind:event.kind,title:event.title,description:event.description,rulesMarkdown:event.rulesMarkdown,prizeLabel:event.prizeLabel,startsAt:event.startsAt,endsAt:event.endsAt,published:true},update:{title:event.title,description:event.description,rulesMarkdown:event.rulesMarkdown,prizeLabel:event.prizeLabel,published:true}});
-    await tx.competitionRound.upsert({where:{competitionId_ordinal:{competitionId:event.id,ordinal:1}},create:{id:event.roundId,competitionId:event.id,title:event.roundTitle,ordinal:1,startsAt:event.startsAt,endsAt:event.endsAt},update:{title:event.roundTitle}});
+    const existing=await tx.competition.findUnique({where:{slug:event.slug},select:{endsAt:true,_count:{select:{registrations:true}},rounds:{select:{_count:{select:{executions:true}}}}}});
+    const mayReschedule=!existing||(existing.endsAt<=now&&existing._count.registrations===0&&existing.rounds.every(round=>round._count.executions===0));
+    const startsAt=new Date(now.getTime()+event.startOffsetDays*86_400_000),endsAt=new Date(now.getTime()+(event.startOffsetDays+event.durationDays)*86_400_000+2*3_600_000);
+    await tx.competition.upsert({where:{slug:event.slug},create:{id:event.id,slug:event.slug,kind:event.kind,title:event.title,description:event.description,rulesMarkdown:event.rulesMarkdown,prizeLabel:event.prizeLabel,startsAt,endsAt,published:true},update:{title:event.title,description:event.description,rulesMarkdown:event.rulesMarkdown,prizeLabel:event.prizeLabel,published:true,...(mayReschedule?{startsAt,endsAt}:{})}});
+    await tx.competitionRound.upsert({where:{competitionId_ordinal:{competitionId:event.id,ordinal:1}},create:{id:event.roundId,competitionId:event.id,title:event.roundTitle,ordinal:1,startsAt,endsAt},update:{title:event.roundTitle,...(mayReschedule?{startsAt,endsAt}:{})}});
     await tx.competitionProblem.upsert({where:{roundId_problemId:{roundId:event.roundId,problemId:sampleProblemId}},create:{roundId:event.roundId,problemId:sampleProblemId,ordinal:1,points:100},update:{ordinal:1,points:100}});
   }
 }

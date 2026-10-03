@@ -63,7 +63,7 @@ export class AuthController {
     res.setHeader('Cache-Control', 'no-store');
     const principal = await this.sessions.resolve(req);
     if (!principal) return {user: null};
-    return {user: {id: principal.userId, username: principal.username, displayName: principal.displayName, role: principal.role}, csrfToken: principal.csrfToken};
+    return {user: {id: principal.userId, username: principal.username, displayName: principal.displayName, avatarUrl:principal.avatarUrl, themePreference:principal.themePreference, role: principal.role}, csrfToken: principal.csrfToken};
   }
   @Post('auth/logout')
   @HttpCode(200)

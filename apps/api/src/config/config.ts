@@ -100,7 +100,7 @@ const envSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['API_ORIGIN'], message: 'Use an exact HTTP or HTTPS origin without path, credentials or trailing slash' });
   }
   if (env.NODE_ENV === 'production' && env.EXECUTIONS_ENABLED === 'true') {
-    if (![env.PASSWORD_AUTH_ENABLED, env.OIDC_ENABLED, env.GOOGLE_AUTH_ENABLED, env.GITHUB_AUTH_ENABLED].includes('true')) ctx.addIssue({code: 'custom', path: ['PASSWORD_AUTH_ENABLED'], message: 'At least one authentication method is required for production execution'});
+    if (![env.PASSWORD_AUTH_ENABLED, env.OIDC_ENABLED, env.GOOGLE_AUTH_ENABLED, env.GITHUB_AUTH_ENABLED].includes('true')) ctx.addIssue({code: 'custom', path: ['AUTHENTICATION'], message: 'At least one authentication method is required for production execution'});
     if (env.PIPELINE_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['PIPELINE_ENABLED'], message: 'Required for production execution'});
     if (env.REALTIME_ENABLED !== 'true') ctx.addIssue({code: 'custom', path: ['REALTIME_ENABLED'], message: 'Required for production execution'});
   }

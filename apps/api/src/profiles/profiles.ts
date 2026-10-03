@@ -39,9 +39,9 @@ function streaks(contributions: ContributionDay[]) {
 export class Profiles {
   constructor(@Inject(Database) private readonly db: Database) {}
 
-  async publicProfile(username: string): Promise<PublicProfile> {
-    const user = await this.db.user.findUnique({where: {username}, select: {id: true, username: true, displayName: true, bio: true, location: true, website: true, createdAt: true}});
-    if (!user) throw new ApiError(404, 'NOT_FOUND', 'Profile not found.');
+  async publicProfile(username: string, allowPrivate=false): Promise<PublicProfile> {
+    const user = await this.db.user.findUnique({where: {username}, select: {id: true, username: true, displayName: true, bio: true, location: true, website: true, avatarUrl:true, profileVisibility:true, deactivatedAt:true, createdAt: true}});
+    if (!user||user.deactivatedAt||(!allowPrivate&&user.profileVisibility==='PRIVATE')) throw new ApiError(404, 'NOT_FOUND', 'Profile not found.');
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 364);
     since.setUTCHours(0, 0, 0, 0);
@@ -66,7 +66,7 @@ export class Profiles {
     const streak = streaks(contributions);
     return {
       username: user.username, displayName: user.displayName, joinedAt: user.createdAt.toISOString(),
-      ...(user.bio ? {bio: user.bio} : {}), ...(user.location ? {location: user.location} : {}), ...(user.website ? {website: user.website} : {}),
+      ...(user.bio ? {bio: user.bio} : {}), ...(user.location ? {location: user.location} : {}), ...(user.website ? {website: user.website} : {}), ...(user.avatarUrl ? {avatarUrl:user.avatarUrl}:{}),
       stats: {totalSubmissions, acceptedSubmissions, successRate: totalSubmissions ? Math.round(acceptedSubmissions * 100 / totalSubmissions) : 0, problemsSolved: count(solvedRows[0]?.count), ...streak, ...(runtime._avg.runtimeMs !== null ? {averageRuntimeMs: Math.round(runtime._avg.runtimeMs)} : {})},
       contributions, languages, difficulties, recentSubmissions,
     };
@@ -75,7 +75,7 @@ export class Profiles {
   async self(userId: string) {
     const user = await this.db.user.findUnique({where: {id: userId}, select: {username: true}});
     if (!user) throw new ApiError(404, 'NOT_FOUND', 'Profile not found.');
-    return this.publicProfile(user.username);
+    return this.publicProfile(user.username,true);
   }
 
   async update(userId: string, input: UpdateProfile) {
@@ -85,6 +85,7 @@ export class Profiles {
       ...(input.bio !== undefined ? {bio: input.bio || null} : {}),
       ...(input.location !== undefined ? {location: input.location || null} : {}),
       ...(input.website !== undefined ? {website: input.website || null} : {}),
+      ...(input.avatarUrl !== undefined ? {avatarUrl: input.avatarUrl || null} : {}),
     };
     try {
       const user = await this.db.$transaction(async tx => {
@@ -101,7 +102,7 @@ export class Profiles {
 
   async leaderboard(cursor?: string) {
     if (cursor) {
-      const active = await this.db.execution.findFirst({where: {userId: cursor, mode: 'SUBMIT'}, select: {id: true}});
+      const active = await this.db.execution.findFirst({where: {userId: cursor, mode: 'SUBMIT',user:{profileVisibility:'PUBLIC',deactivatedAt:null}}, select: {id: true}});
       if (!active) throw new ApiError(400, 'INVALID_CURSOR', 'Leaderboard cursor is invalid.');
     }
     const cursorClause = cursor ? Prisma.sql`WHERE ranked.rank > (SELECT rank FROM ranked WHERE id=${cursor}::uuid)` : Prisma.empty;
@@ -112,6 +113,7 @@ export class Profiles {
           count(DISTINCT pv."problemId") FILTER (WHERE e.verdict='ACCEPTED')::bigint AS "problemsSolved"
         FROM "User" u JOIN "Execution" e ON e."userId"=u.id AND e.mode='SUBMIT'
         JOIN "ProblemVersion" pv ON pv.id=e."problemVersionId"
+        WHERE u."profileVisibility"='PUBLIC' AND u."deactivatedAt" IS NULL
         GROUP BY u.id
       ), ranked AS (
         SELECT *, row_number() OVER (ORDER BY "problemsSolved" DESC, "acceptedSubmissions" DESC, username ASC, id ASC)::bigint AS rank FROM stats

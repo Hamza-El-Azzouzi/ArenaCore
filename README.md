@@ -37,6 +37,7 @@ The supplied PDF references an earlier sandbox security specification that is ab
 - [Backend continuous deployment and host bootstrap](infra/deploy/README.md)
 - [Auth0 production registration and acceptance](docs/AUTH0_SETUP.md)
 - [Encrypted PostgreSQL backup and restore runbook](docs/operations/BACKUP_AND_RESTORE.md)
+- [Production readiness audit and remaining release gates](docs/PRODUCTION_READINESS_AUDIT.md)
 - [Copy-ready v0 frontend prompt](docs/prompts/V0_PROMPT.md)
 - [Copy-ready Bolt frontend prompt](docs/prompts/BOLT_PROMPT.md)
 - [Frontend repository](https://github.com/Hamza-El-Azzouzi/arenaCore-frontend)
@@ -67,11 +68,14 @@ Available routes under `/api/v1`:
 
 - `GET /health/live`, `GET /health/ready`
 - `GET /problems`, `GET /problems/:slug`
-- `GET /auth/login`, `GET /auth/callback`
+- `GET /auth/login`, `GET /auth/callback`; `POST /auth/register`, `POST /auth/password`
 - `GET /me` (anonymous returns `{user: null}`)
 - `POST /auth/logout` (session + Origin + CSRF required)
 - `GET /profiles/me`, `PATCH /profiles/me`
 - `GET /profiles/:username`, `GET /leaderboard`
+- `GET`, `PATCH /account/settings`
+- `GET`, `DELETE /account/sessions`; `DELETE /account/sessions/:id`
+- `PATCH /account/email`, `PATCH /account/password`, `DELETE /account`
 - `GET`, `POST /problems/:slug/discussions`
 - `GET`, `POST /discussions/:id/replies`; `PUT`, `DELETE /discussions/:id/like`
 - `POST /executions`, `GET /executions/:id`, `POST /executions/:id/cancel`
