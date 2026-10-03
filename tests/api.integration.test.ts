@@ -22,12 +22,14 @@ integration('real PostgreSQL API integration', () => {
   let cookie: string;
   let otherCookie: string;
   let csrf: string;
+  let otherCsrf: string;
+  let reportId: string;
   let jobId: string;
   const origin = 'http://localhost:3000';
   const input = {problemId: sampleProblemId, language: 'python', mode: 'SUBMIT', sourceCode: 'print(5)'};
   const key = 'integration-request-key-001';
   async function request(path: string, options: RequestInit = {}, asOther = false) {
-    return fetch(`${base}${path}`, {...options, headers: {cookie: asOther ? otherCookie : cookie, origin, 'x-csrf-token': csrf, 'content-type': 'application/json', ...options.headers}});
+    return fetch(`${base}${path}`, {...options, headers: {cookie: asOther ? otherCookie : cookie, origin, 'x-csrf-token': asOther?otherCsrf:csrf, 'content-type': 'application/json', ...options.headers}});
   }
   beforeAll(async () => {
     process.env.DATABASE_URL = url;
@@ -47,6 +49,7 @@ integration('real PostgreSQL API integration', () => {
     cookie = `arenacore_session=${sessions[0]!.token}`;
     otherCookie = `arenacore_session=${sessions[1]!.token}`;
     csrf = sessions[0]!.csrfToken;
+    otherCsrf=sessions[1]!.csrfToken;
     app = await createApp();
     await app.listen(0, '127.0.0.1');
     base = `${await app.getUrl()}/api/v1`;
@@ -195,6 +198,12 @@ integration('real PostgreSQL API integration', () => {
     const replies = await json<{items: DiscussionPost[]}>(await request(`/discussions/${thread.id}/replies`, {headers: {cookie: ''}}));
     expect(replies.items).toContainEqual(expect.objectContaining({id: reply.id}));
     expect(JSON.stringify(listed)).not.toContain('issuer');
+    const otherThread=await json<DiscussionPost>(await request('/problems/sum-two-numbers/discussions',{method:'POST',body:JSON.stringify({title:'Is this discussion appropriate?',body:'This post is used to verify the real moderation workflow.'})},true));
+    const report=await json<{id:string;status:string}>(await request(`/discussions/${otherThread.id}/reports`,{method:'POST',body:JSON.stringify({reason:'OFF_TOPIC',details:'This discussion does not address the problem statement.'})}));
+    reportId=report.id;
+    expect(report.status).toBe('PENDING');
+    expect((await request(`/discussions/${otherThread.id}/reports`,{method:'POST',body:JSON.stringify({reason:'SPAM'})})).status).toBe(409);
+    expect(await json(await request('/reports/me'))).toMatchObject({items:[{id:reportId,status:'PENDING'}]});
   });
   it('enforces the shared discussion write quota in PostgreSQL', async () => {
     await db.discussionRateLimit.deleteMany({where: {userId: ownerId}});
@@ -280,6 +289,23 @@ integration('real PostgreSQL API integration', () => {
     const users = await json<{items:Array<{id:string;role:string}>}>(await request('/admin/users'));
     expect(users.items).toContainEqual(expect.objectContaining({id:ownerId,role:'ADMIN'}));
     expect((await request(`/admin/users/${ownerId}/role`, {method:'PATCH',body:JSON.stringify({role:'USER'})})).status).toBe(409);
+    expect(await json(await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'MODERATOR'})}))).toMatchObject({role:'MODERATOR'});
+    const queue=await json<{items:Array<{id:string;post:{body:string}}> }>(await request('/admin/moderation',{},true));
+    expect(queue.items).toContainEqual(expect.objectContaining({id:reportId}));
+    expect(JSON.stringify(queue)).not.toContain('issuer');
+    expect((await request('/admin/users',{},true)).status).toBe(403);
+    expect(await json(await request(`/admin/reports/${reportId}`,{method:'PATCH',body:JSON.stringify({status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',postStatus:'HIDDEN'})},true))).toMatchObject({status:'RESOLVED'});
+    expect((await json<{items:unknown[]}>(await request('/admin/moderation',{},true))).items).toHaveLength(0);
+    await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'USER'})});
+    const until=new Date(Date.now()+60_000).toISOString();
+    expect(await json(await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'SUSPEND',until,reason:'Temporary integration-test restriction.'})}))).toMatchObject({restrictionReason:'Temporary integration-test restriction.'});
+    const restrictedSecrets=newSessionSecrets();
+    await db.session.create({data:{userId:otherId,tokenHash:restrictedSecrets.tokenHash,csrfTokenHash:restrictedSecrets.csrfTokenHash,expiresAt:new Date(Date.now()+600_000)}});
+    const restricted=await request('/submissions',{headers:{cookie:`arenacore_session=${restrictedSecrets.token}`}},true);
+    expect(restricted.status).toBe(403);
+    expect((await json<{error:{code:string}}>(restricted)).error.code).toBe('ACCOUNT_SUSPENDED');
+    expect((await request('/auth/logout',{method:'POST',headers:{cookie:`arenacore_session=${restrictedSecrets.token}`,'x-csrf-token':restrictedSecrets.csrfToken}},true)).status).toBe(200);
+    await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'CLEAR'})});
     const problemSlug=`draft-${crypto.randomUUID()}`;
     const created=await json<{id:string;published:boolean}>(await request('/admin/problems',{method:'POST',body:JSON.stringify({slug:problemSlug,title:'Integration Draft Problem',difficulty:'EASY',tags:['integration'],statementMarkdown:'Read the input and produce the required deterministic output.',constraints:['Input is bounded.'],timeMs:1000,memoryKiB:65536,templates:{java:'class Solution {}',python:'# solution',javascript:'// solution'},tests:[{visibility:'PUBLIC',input:'1\n',expectedOutput:'1\n'},{visibility:'HIDDEN',input:'2\n',expectedOutput:'2\n'}],publish:false})}));
     expect(created.published).toBe(false);

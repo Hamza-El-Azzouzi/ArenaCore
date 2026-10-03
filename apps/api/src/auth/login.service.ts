@@ -81,8 +81,9 @@ export class LoginService {
     const session = newSessionSecrets();
     const expiresAt = new Date(Date.now() + this.config.values.SESSION_TTL_SECONDS * 1000);
     await this.db.$transaction(async tx => {
-      const user = await tx.user.upsert({where: {issuer_subject: {issuer: identity.issuer, subject: identity.subject}}, create: identity, update: {displayName: identity.displayName}});
+      const user = await tx.user.upsert({where: {issuer_subject: {issuer: identity.issuer, subject: identity.subject}}, create: identity, update: {displayName: identity.displayName},select:{id:true,bannedAt:true,suspendedUntil:true}});
       // Role is owned by the database; provider profile/role claims cannot grant ADMIN.
+      this.ensureAllowed(user);
       await this.persistSession(tx, req, user.id, 'AUTH_LOGIN', session, expiresAt);
     });
     return {token: session.token, expiresAt};
@@ -91,11 +92,16 @@ export class LoginService {
     const session = newSessionSecrets();
     const expiresAt = new Date(Date.now() + this.config.values.SESSION_TTL_SECONDS * 1000);
     await this.db.$transaction(async tx => {
-      const user = await tx.user.findUnique({where: {id: userId}, select: {id: true}});
+      const user = await tx.user.findUnique({where: {id: userId}, select: {id: true,bannedAt:true,suspendedUntil:true}});
       if (!user) throw new ApiError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
+      this.ensureAllowed(user);
       await this.persistSession(tx, req, user.id, action, session, expiresAt);
     });
     return {token: session.token, expiresAt};
+  }
+  private ensureAllowed(user:{bannedAt:Date|null;suspendedUntil:Date|null}){
+    if(user.bannedAt)throw new ApiError(403,'ACCOUNT_BANNED','This account has been banned. Contact support if you believe this is a mistake.');
+    if(user.suspendedUntil&&user.suspendedUntil.getTime()>Date.now())throw new ApiError(403,'ACCOUNT_SUSPENDED','This account is temporarily suspended.',Math.max(1,Math.ceil((user.suspendedUntil.getTime()-Date.now())/1000)));
   }
   private async persistSession(tx: Prisma.TransactionClient, req: Request, userId: string, action: string, session: ReturnType<typeof newSessionSecrets>, expiresAt: Date) {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId}::uuid FOR UPDATE`;

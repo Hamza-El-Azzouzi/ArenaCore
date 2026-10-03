@@ -4,7 +4,7 @@ import {Prisma} from '@prisma/client';
 import {Response} from 'express';
 import {serialize} from 'cookie';
 import {z} from 'zod';
-import {AuthenticatedRequest, SessionGuard} from '../auth/session';
+import {AllowRestricted, AuthenticatedRequest, SessionGuard} from '../auth/session';
 import {hashPassword, verifyPassword} from '../auth/password';
 import {ApiError, validate} from '../common/errors';
 import {Config} from '../config/config';
@@ -126,5 +126,6 @@ export class AccountController {
   @Patch('password') changePassword(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.account.changePassword(req.principal.userId,req.principal.sessionId,validate(passwordSchema,body));}
   @Patch('email') changeEmail(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.account.changeEmail(req.principal.userId,req.principal.sessionId,validate(emailSchema,body));}
   @Delete() @HttpCode(200)
+  @AllowRestricted()
   async deactivate(@Req() req:AuthenticatedRequest,@Body() body:unknown,@Res({passthrough:true}) res:Response){const result=await this.account.deactivate(req.principal.userId,validate(deactivateSchema,body));this.clearCookie(res);return result;}
 }

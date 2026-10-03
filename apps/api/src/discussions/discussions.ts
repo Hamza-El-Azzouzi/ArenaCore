@@ -8,6 +8,7 @@ import {ApiError, validate} from '../common/errors';
 import {Database} from '../database/database';
 
 const slugSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100);
+const reportSchema=z.strictObject({reason:z.enum(['SPAM','HARASSMENT','SOLUTION_LEAK','OFF_TOPIC','OTHER']),details:z.string().trim().min(3).max(1000).optional()});
 const postSelect = {
   id: true, title: true, body: true, createdAt: true, updatedAt: true,
   author: {select: {username: true, displayName: true}},
@@ -99,6 +100,22 @@ export class Discussions {
     });
     return {postId, liked, likeCount};
   }
+
+  async report(postId:string,userId:string,input:z.infer<typeof reportSchema>){
+    const post=await this.db.discussionPost.findFirst({where:{id:postId,status:'VISIBLE',problem:{currentVersion:{is:{published:true}}}},select:{id:true,authorId:true}});
+    if(!post)throw new ApiError(404,'NOT_FOUND','Discussion not found.');
+    if(post.authorId===userId)throw new ApiError(409,'SELF_REPORT_FORBIDDEN','You cannot report your own discussion.');
+    try{return await this.db.$transaction(async tx=>{
+      const report=await tx.contentReport.create({data:{postId,reporterId:userId,reason:input.reason,details:input.details},select:{id:true,status:true,reason:true,createdAt:true}});
+      await tx.auditEvent.create({data:{actorId:userId,action:'DISCUSSION_REPORT_CREATE',targetId:report.id}});
+      return {...report,createdAt:report.createdAt.toISOString()};
+    });}catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002')throw new ApiError(409,'ALREADY_REPORTED','You already reported this discussion.');throw error;}
+  }
+
+  async reports(userId:string){
+    const rows=await this.db.contentReport.findMany({where:{reporterId:userId},select:{id:true,reason:true,status:true,details:true,moderatorNote:true,createdAt:true,resolvedAt:true,post:{select:{id:true,title:true,problem:{select:{slug:true,currentVersion:{select:{title:true}}}}}}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100});
+    return {items:rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),resolvedAt:row.resolvedAt?.toISOString()??null,post:{id:row.post.id,title:row.post.title,problem:{slug:row.post.problem.slug,title:row.post.problem.currentVersion?.title??row.post.problem.slug}}}))};
+  }
 }
 
 @Controller()
@@ -126,4 +143,12 @@ export class DiscussionsController {
   @Delete('discussions/:id/like')
   @UseGuards(SessionGuard)
   unlike(@Param('id') id: string, @Req() req: AuthenticatedRequest) { return this.discussions.like(validate(uuidSchema, id), req.principal.userId, false); }
+
+  @Post('discussions/:id/reports')
+  @UseGuards(SessionGuard)
+  report(@Param('id') id:string,@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.discussions.report(validate(uuidSchema,id),req.principal.userId,validate(reportSchema,body));}
+
+  @Get('reports/me')
+  @UseGuards(SessionGuard)
+  reports(@Req() req:AuthenticatedRequest){return this.discussions.reports(req.principal.userId);}
 }

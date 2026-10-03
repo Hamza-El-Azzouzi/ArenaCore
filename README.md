@@ -78,6 +78,9 @@ Available routes under `/api/v1`:
 - `PATCH /account/email`, `PATCH /account/password`, `DELETE /account`
 - `GET`, `POST /problems/:slug/discussions`
 - `GET`, `POST /discussions/:id/replies`; `PUT`, `DELETE /discussions/:id/like`
+- `POST /discussions/:id/reports`, `GET /reports/me`
+- `GET /admin/moderation`, `PATCH /admin/reports/:id` (moderator or administrator)
+- `PATCH /admin/users/:id/role`, `PATCH /admin/users/:id/restriction` (administrator)
 - `POST /executions`, `GET /executions/:id`, `POST /executions/:id/cancel`
 - `GET /submissions`
 

@@ -6,7 +6,7 @@ import { ApiError, validate } from '../common/errors';
 import { z } from 'zod';
 import { LoginService, LOGIN_TTL_SECONDS } from './login.service';
 import { Database } from '../database/database';
-import { AuthenticatedRequest, Sessions, SessionGuard } from './session';
+import { AllowRestricted, AuthenticatedRequest, Sessions, SessionGuard } from './session';
 import { PasswordAuthService } from './password-auth.service';
 
 const email = z.string().trim().toLowerCase().email().max(254);
@@ -63,10 +63,11 @@ export class AuthController {
     res.setHeader('Cache-Control', 'no-store');
     const principal = await this.sessions.resolve(req);
     if (!principal) return {user: null};
-    return {user: {id: principal.userId, username: principal.username, displayName: principal.displayName, avatarUrl:principal.avatarUrl, themePreference:principal.themePreference, role: principal.role}, csrfToken: principal.csrfToken};
+    return {user: {id: principal.userId, username: principal.username, displayName: principal.displayName, avatarUrl:principal.avatarUrl, themePreference:principal.themePreference, role: principal.role,restriction:principal.restriction}, csrfToken: principal.csrfToken};
   }
   @Post('auth/logout')
   @HttpCode(200)
+  @AllowRestricted()
   @UseGuards(SessionGuard)
   async logout(@Req() req: AuthenticatedRequest, @Res({passthrough: true}) res: Response) {
     await this.db.$transaction(async tx => {
