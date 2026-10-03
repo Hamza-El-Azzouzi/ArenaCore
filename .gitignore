@@ -7,3 +7,5 @@ coverage/
 *.log
 docs/learning
 docs/prompts
+.codex/
+graphify-out/
