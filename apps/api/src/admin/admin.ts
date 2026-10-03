@@ -8,8 +8,16 @@ import {Database} from '../database/database';
 
 const uuid = z.uuid();
 const cursorQuery = z.strictObject({cursor: uuid.optional()});
-const roleInput = z.strictObject({role: z.enum(['USER', 'ADMIN'])});
+const analyticsQuery=z.strictObject({days:z.coerce.number().int().refine(value=>[7,30,90].includes(value),'Choose a 7, 30, or 90 day period.').default(30)});
+const userQuery=z.strictObject({cursor:uuid.optional(),search:z.string().trim().min(2).max(100).optional(),role:z.enum(['USER','MODERATOR','ADMIN']).optional(),restriction:z.enum(['ACTIVE','SUSPENDED','BANNED']).optional()});
+const roleInput = z.strictObject({role: z.enum(['USER', 'MODERATOR','ADMIN'])});
 const moderationInput = z.strictObject({status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED'])});
+const resolveReportInput=z.strictObject({status:z.enum(['RESOLVED','DISMISSED']),moderatorNote:z.string().trim().min(3).max(1000),postStatus:z.enum(['VISIBLE','HIDDEN','DELETED']).optional()});
+const restrictionInput=z.discriminatedUnion('action',[
+  z.strictObject({action:z.literal('SUSPEND'),until:z.iso.datetime(),reason:z.string().trim().min(3).max(500)}),
+  z.strictObject({action:z.literal('BAN'),reason:z.string().trim().min(3).max(500)}),
+  z.strictObject({action:z.literal('CLEAR')}),
+]);
 const publicationInput=z.strictObject({published:z.boolean()});
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100);
 const testFileName=z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).refine(name=>!['Solution.java','Solution.class','solution.py','solution.js'].includes(name)&&!name.endsWith('.class'),'Reserved or unsafe input filename');
@@ -63,18 +71,47 @@ export class AdminService {
       this.db.user.count(),
       this.db.execution.count({where: {mode: 'SUBMIT', createdAt: {gte: today}}}),
       this.db.problemVersion.count({where: {published: true, currentFor: {isNot: null}}}),
-      this.db.discussionPost.count({where: {status: 'HIDDEN'}}),
+      this.db.contentReport.count({where: {status: 'PENDING'}}),
       this.db.execution.count({where: {state: {in: [...active]}}}),
       this.db.execution.findMany({where: {mode: 'SUBMIT'}, select: {id:true, language:true, state:true, verdict:true, runtimeMs:true, createdAt:true, user:{select:{username:true,displayName:true}}, problemVersion:{select:{title:true,problem:{select:{slug:true}}}}}, orderBy:[{createdAt:'desc'},{id:'desc'}], take:8}),
     ]);
     return {stats: {users, submissionsToday, publishedProblems, moderationPending, activeExecutions}, recentSubmissions: recent.map(row => ({id:row.id, language:row.language, state:row.state, verdict:row.verdict, runtimeMs:row.runtimeMs, createdAt:row.createdAt.toISOString(), user:row.user, problem:{slug:row.problemVersion.problem.slug,title:row.problemVersion.title}}))};
   }
 
-  async users(cursor?: string) {
+  async analytics(days:number) {
+    const until=new Date();
+    const since=new Date(Date.UTC(until.getUTCFullYear(),until.getUTCMonth(),until.getUTCDate()-days+1));
+    type DailyRow={date:string;submissions:number;accepted:number;activeUsers:number};
+    type ActiveRow={count:number};
+    type ProblemRow={slug:string;title:string;submissions:number;accepted:number};
+    const [newUsers,submissions,accepted,activeRows,dailyRows,problemRows]=await Promise.all([
+      this.db.user.count({where:{createdAt:{gte:since}}}),
+      this.db.execution.count({where:{mode:'SUBMIT',createdAt:{gte:since}}}),
+      this.db.execution.count({where:{mode:'SUBMIT',verdict:'ACCEPTED',createdAt:{gte:since}}}),
+      this.db.$queryRaw<ActiveRow[]>`SELECT COUNT(DISTINCT "userId")::int AS count FROM "Execution" WHERE mode='SUBMIT'::"ExecutionMode" AND "createdAt">=${since}`,
+      this.db.$queryRaw<DailyRow[]>`SELECT to_char(date_trunc('day',e."createdAt"),'YYYY-MM-DD') AS date, COUNT(*)::int AS submissions, COUNT(*) FILTER (WHERE e.verdict='ACCEPTED'::"Verdict")::int AS accepted, COUNT(DISTINCT e."userId")::int AS "activeUsers" FROM "Execution" e WHERE e.mode='SUBMIT'::"ExecutionMode" AND e."createdAt">=${since} GROUP BY date_trunc('day',e."createdAt") ORDER BY date_trunc('day',e."createdAt")`,
+      this.db.$queryRaw<ProblemRow[]>`SELECT p.slug,(array_agg(pv.title ORDER BY e."createdAt" DESC))[1] AS title,COUNT(*)::int AS submissions,COUNT(*) FILTER (WHERE e.verdict='ACCEPTED'::"Verdict")::int AS accepted FROM "Execution" e JOIN "ProblemVersion" pv ON pv.id=e."problemVersionId" JOIN "Problem" p ON p.id=pv."problemId" WHERE e.mode='SUBMIT'::"ExecutionMode" AND e."createdAt">=${since} GROUP BY p.id,p.slug ORDER BY submissions DESC,p.slug ASC LIMIT 10`,
+    ]);
+    const byDate=new Map(dailyRows.map(row=>[row.date,row]));
+    const daily=Array.from({length:days},(_,offset)=>{const date=new Date(since);date.setUTCDate(since.getUTCDate()+offset);const key=date.toISOString().slice(0,10);return byDate.get(key)??{date:key,submissions:0,accepted:0,activeUsers:0};});
+    return {period:{days,since:since.toISOString(),until:until.toISOString()},stats:{newUsers,submissions,accepted,activeUsers:activeRows[0]?.count??0,successRate:submissions?Math.round(accepted*1000/submissions)/10:0},daily,topProblems:problemRows.map(row=>({...row,successRate:row.submissions?Math.round(row.accepted*1000/row.submissions)/10:0}))};
+  }
+
+  async analyticsExport(days:number) {
+    const report=await this.analytics(days);
+    const quote=(value:string|number)=>`"${String(value).replaceAll('"','""')}"`;
+    const rows=[['date','submissions','accepted','active_users'],...report.daily.map(row=>[row.date,row.submissions,row.accepted,row.activeUsers])];
+    return {filename:`arenacore-analytics-${report.period.since.slice(0,10)}-${report.period.until.slice(0,10)}.csv`,contentType:'text/csv',content:rows.map(row=>row.map(quote).join(',')).join('\n')+'\n'};
+  }
+
+  async users(query:z.infer<typeof userQuery>) {
+    const {cursor,search,role,restriction}=query;
     const boundary = cursor ? await this.db.user.findUnique({where:{id:cursor},select:{id:true,createdAt:true}}) : null;
     if (cursor && !boundary) throw new ApiError(400, 'INVALID_CURSOR', 'User cursor is invalid.');
-    const rows = await this.db.user.findMany({where: pageBoundary(boundary), select:{id:true,username:true,displayName:true,role:true,createdAt:true,_count:{select:{executions:true}}}, orderBy:[{createdAt:'desc'},{id:'desc'}], take:21});
-    const items=rows.slice(0,20).map(row=>({id:row.id,username:row.username,displayName:row.displayName,role:row.role,joinedAt:row.createdAt.toISOString(),submissions:row._count.executions}));
+    const now=new Date();
+    const restrictionWhere=restriction==='BANNED'?{bannedAt:{not:null}}:restriction==='SUSPENDED'?{bannedAt:null,suspendedUntil:{gt:now}}:restriction==='ACTIVE'?{bannedAt:null,OR:[{suspendedUntil:null},{suspendedUntil:{lte:now}}]}:{};
+    const rows = await this.db.user.findMany({where: {AND:[pageBoundary(boundary),role?{role}:{},search?{OR:[{username:{contains:search,mode:'insensitive' as const}},{displayName:{contains:search,mode:'insensitive' as const}},{credential:{is:{email:{contains:search,mode:'insensitive' as const}}}}]}:{},restrictionWhere]}, select:{id:true,username:true,displayName:true,role:true,createdAt:true,suspendedUntil:true,bannedAt:true,restrictionReason:true,_count:{select:{executions:true}}}, orderBy:[{createdAt:'desc'},{id:'desc'}], take:21});
+    const items=rows.slice(0,20).map(row=>({id:row.id,username:row.username,displayName:row.displayName,role:row.role,joinedAt:row.createdAt.toISOString(),submissions:row._count.executions,restriction:row.bannedAt?{kind:'BANNED',reason:row.restrictionReason,until:null}:row.suspendedUntil&&row.suspendedUntil>now?{kind:'SUSPENDED',reason:row.restrictionReason,until:row.suspendedUntil.toISOString()}:null}));
     return {items,nextCursor:rows.length>20?items.at(-1)!.id:null};
   }
 
@@ -99,8 +136,8 @@ export class AdminService {
   }
 
   async moderation() {
-    const rows=await this.db.discussionPost.findMany({where:{parentId:null},select:{id:true,title:true,body:true,status:true,createdAt:true,author:{select:{username:true,displayName:true}},problem:{select:{slug:true,currentVersion:{select:{title:true}}}},_count:{select:{replies:true,likes:true}}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100});
-    return {items:rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),problem:{slug:row.problem.slug,title:row.problem.currentVersion?.title??row.problem.slug},replyCount:row._count.replies,likeCount:row._count.likes,_count:undefined}))};
+    const rows=await this.db.contentReport.findMany({where:{status:'PENDING'},select:{id:true,reason:true,details:true,status:true,createdAt:true,reporter:{select:{username:true,displayName:true}},post:{select:{id:true,title:true,body:true,status:true,createdAt:true,author:{select:{id:true,username:true,displayName:true}},problem:{select:{slug:true,currentVersion:{select:{title:true}}}}}}},orderBy:[{createdAt:'asc'},{id:'asc'}],take:100});
+    return {items:rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),post:{...row.post,createdAt:row.post.createdAt.toISOString(),problem:{slug:row.post.problem.slug,title:row.post.problem.currentVersion?.title??row.post.problem.slug}}}))};
   }
 
   async competitions() {
@@ -113,13 +150,33 @@ export class AdminService {
     const user=await this.db.user.findUnique({where:{id:userId},select:{id:true,role:true}});
     if(!user)throw new ApiError(404,'NOT_FOUND','User not found.');
     if(user.role===role)return {id:user.id,role:user.role};
-    return this.db.$transaction(async tx=>{const updated=await tx.user.update({where:{id:userId},data:{role},select:{id:true,role:true}});await tx.auditEvent.create({data:{actorId,action:'ADMIN_USER_ROLE_UPDATE',targetId:userId}});return updated;});
+    return this.db.$transaction(async tx=>{if(user.role==='ADMIN'&&role!=='ADMIN'){await tx.$queryRaw`SELECT id FROM "User" WHERE role='ADMIN' FOR UPDATE`;if(await tx.user.count({where:{role:'ADMIN'}})<=1)throw new ApiError(409,'LAST_ADMIN_REQUIRED','At least one administrator must remain.');}const updated=await tx.user.update({where:{id:userId},data:{role},select:{id:true,role:true}});await tx.auditEvent.create({data:{actorId,action:'ADMIN_USER_ROLE_UPDATE',targetId:userId}});return updated;});
+  }
+
+  async restrict(actorId:string,userId:string,input:z.infer<typeof restrictionInput>){
+    if(actorId===userId)throw new ApiError(409,'SELF_RESTRICTION_FORBIDDEN','You cannot restrict your own account.');
+    const user=await this.db.user.findUnique({where:{id:userId},select:{id:true,role:true}});
+    if(!user)throw new ApiError(404,'NOT_FOUND','User not found.');
+    if(user.role==='ADMIN')throw new ApiError(409,'ADMIN_RESTRICTION_FORBIDDEN','Remove administrator access before restricting this account.');
+    const now=new Date();
+    let data:{bannedAt:Date|null;suspendedUntil:Date|null;restrictionReason:string|null};
+    if(input.action==='BAN')data={bannedAt:now,suspendedUntil:null,restrictionReason:input.reason};
+    else if(input.action==='SUSPEND'){const until=new Date(input.until);if(until<=now||until.getTime()>now.getTime()+365*24*60*60*1000)throw new ApiError(400,'INVALID_SUSPENSION','Suspension must end within the next 365 days.');data={bannedAt:null,suspendedUntil:until,restrictionReason:input.reason};}
+    else data={bannedAt:null,suspendedUntil:null,restrictionReason:null};
+    return this.db.$transaction(async tx=>{const updated=await tx.user.update({where:{id:userId},data,select:{id:true,bannedAt:true,suspendedUntil:true,restrictionReason:true}});if(input.action!=='CLEAR')await tx.session.updateMany({where:{userId,revokedAt:null},data:{revokedAt:now}});await tx.auditEvent.create({data:{actorId,action:`ADMIN_USER_RESTRICTION_${input.action}`,targetId:userId}});return {...updated,bannedAt:updated.bannedAt?.toISOString()??null,suspendedUntil:updated.suspendedUntil?.toISOString()??null};});
   }
 
   async moderate(actorId:string,postId:string,status:DiscussionStatus) {
     const post=await this.db.discussionPost.findUnique({where:{id:postId},select:{id:true}});
     if(!post)throw new ApiError(404,'NOT_FOUND','Discussion not found.');
     return this.db.$transaction(async tx=>{const updated=await tx.discussionPost.update({where:{id:postId},data:{status},select:{id:true,status:true}});await tx.auditEvent.create({data:{actorId,action:`DISCUSSION_${status}`,targetId:postId}});return updated;});
+  }
+
+  async resolveReport(actorId:string,reportId:string,input:z.infer<typeof resolveReportInput>){
+    const report=await this.db.contentReport.findUnique({where:{id:reportId},select:{id:true,status:true,postId:true}});
+    if(!report)throw new ApiError(404,'NOT_FOUND','Report not found.');
+    if(report.status!=='PENDING')throw new ApiError(409,'REPORT_ALREADY_REVIEWED','This report has already been reviewed.');
+    return this.db.$transaction(async tx=>{if(input.postStatus)await tx.discussionPost.update({where:{id:report.postId},data:{status:input.postStatus}});const updated=await tx.contentReport.update({where:{id:reportId},data:{status:input.status,moderatorId:actorId,moderatorNote:input.moderatorNote,resolvedAt:new Date()},select:{id:true,status:true,resolvedAt:true}});await tx.auditEvent.create({data:{actorId,action:`CONTENT_REPORT_${input.status}`,targetId:reportId}});return {...updated,resolvedAt:updated.resolvedAt!.toISOString()};});
   }
 
   async createProblem(actorId:string,input:z.infer<typeof createProblemInput>) {
@@ -194,14 +251,18 @@ export class AdminService {
 export class AdminController {
   constructor(@Inject(AdminService) private readonly admin:AdminService){}
   @Get('overview') overview(){return this.admin.overview();}
-  @Get('users') users(@Query() query:unknown){return this.admin.users(validate(cursorQuery,query).cursor);}
+  @Get('analytics') analytics(@Query() query:unknown){return this.admin.analytics(validate(analyticsQuery,query).days);}
+  @Get('analytics/export') analyticsExport(@Query() query:unknown){return this.admin.analyticsExport(validate(analyticsQuery,query).days);}
+  @Get('users') users(@Query() query:unknown){return this.admin.users(validate(userQuery,query));}
   @Get('submissions') submissions(@Query() query:unknown){return this.admin.submissions(validate(cursorQuery,query).cursor);}
   @Get('problems') problems(){return this.admin.problems();}
   @Get('problems/:id') problem(@Param('id') id:string){return this.admin.problem(validate(uuid,id));}
-  @Get('moderation') moderation(){return this.admin.moderation();}
+  @Get('moderation') @RequireRoles('ADMIN','MODERATOR') moderation(){return this.admin.moderation();}
   @Get('competitions') competitions(){return this.admin.competitions();}
   @Patch('users/:id/role') setRole(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setRole(req.principal.userId,validate(uuid,id),validate(roleInput,body).role);}
-  @Patch('discussions/:id/status') moderate(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.moderate(req.principal.userId,validate(uuid,id),validate(moderationInput,body).status);}
+  @Patch('users/:id/restriction') restrict(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.restrict(req.principal.userId,validate(uuid,id),validate(restrictionInput,body));}
+  @Patch('reports/:id') @RequireRoles('ADMIN','MODERATOR') resolveReport(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.resolveReport(req.principal.userId,validate(uuid,id),validate(resolveReportInput,body));}
+  @Patch('discussions/:id/status') @RequireRoles('ADMIN','MODERATOR') moderate(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.moderate(req.principal.userId,validate(uuid,id),validate(moderationInput,body).status);}
   @Post('problems') createProblem(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.admin.createProblem(req.principal.userId,validate(createProblemInput,body));}
   @Patch('problems/:id') editProblem(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.editProblem(req.principal.userId,validate(uuid,id),validate(createProblemInput,body));}
   @Patch('problems/:id/publication') setProblemPublication(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setProblemPublication(req.principal.userId,validate(uuid,id),validate(publicationInput,body).published);}

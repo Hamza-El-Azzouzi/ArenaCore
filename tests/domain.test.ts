@@ -71,7 +71,7 @@ describe('deployment config', () => {
     };
     expect(() => parseConfig({...production, REALTIME_ENABLED: 'true'})).toThrow('PIPELINE_ENABLED');
     expect(() => parseConfig({...production, PIPELINE_ENABLED: 'true'})).toThrow('REALTIME_ENABLED');
-    expect(() => parseConfig({...production, PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true', OIDC_ENABLED: 'false'})).toThrow('OIDC_ENABLED');
+    expect(() => parseConfig({...production, PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true', OIDC_ENABLED: 'false'})).toThrow('AUTHENTICATION');
     expect(parseConfig({...production, PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true'})).toMatchObject({
       EXECUTIONS_ENABLED: 'true', PIPELINE_ENABLED: 'true', REALTIME_ENABLED: 'true', OIDC_ENABLED: 'true',
     });

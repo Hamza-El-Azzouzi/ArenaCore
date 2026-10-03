@@ -37,11 +37,12 @@ The supplied PDF references an earlier sandbox security specification that is ab
 - [Backend continuous deployment and host bootstrap](infra/deploy/README.md)
 - [Auth0 production registration and acceptance](docs/AUTH0_SETUP.md)
 - [Encrypted PostgreSQL backup and restore runbook](docs/operations/BACKUP_AND_RESTORE.md)
+- [Production readiness audit and remaining release gates](docs/PRODUCTION_READINESS_AUDIT.md)
 - [Copy-ready v0 frontend prompt](docs/prompts/V0_PROMPT.md)
 - [Copy-ready Bolt frontend prompt](docs/prompts/BOLT_PROMPT.md)
 - [Frontend repository](https://github.com/Hamza-El-Azzouzi/arenaCore-frontend)
 
-The generated UI now lives in the separate frontend repository. Its core problem, workspace, identity, execution and history routes use the backend contract; unsupported generated product screens return 404. Demo results remain clearly labelled simulations, while actual judging belongs to the isolated backend.
+The generated UI now lives in the separate frontend repository. Its problem, workspace, identity, execution, history, profile, discussion, competition, moderation, and administrator routes use backend contracts. Mock sessions, data, and execution simulations have been removed; judging belongs exclusively to the isolated backend.
 
 ## Learn the backend and NestJS
 
@@ -67,13 +68,19 @@ Available routes under `/api/v1`:
 
 - `GET /health/live`, `GET /health/ready`
 - `GET /problems`, `GET /problems/:slug`
-- `GET /auth/login`, `GET /auth/callback`
+- `GET /auth/login`, `GET /auth/callback`; `POST /auth/register`, `POST /auth/password`
 - `GET /me` (anonymous returns `{user: null}`)
 - `POST /auth/logout` (session + Origin + CSRF required)
 - `GET /profiles/me`, `PATCH /profiles/me`
 - `GET /profiles/:username`, `GET /leaderboard`
+- `GET`, `PATCH /account/settings`
+- `GET`, `DELETE /account/sessions`; `DELETE /account/sessions/:id`
+- `PATCH /account/email`, `PATCH /account/password`, `DELETE /account`
 - `GET`, `POST /problems/:slug/discussions`
 - `GET`, `POST /discussions/:id/replies`; `PUT`, `DELETE /discussions/:id/like`
+- `POST /discussions/:id/reports`, `GET /reports/me`
+- `GET /admin/moderation`, `PATCH /admin/reports/:id` (moderator or administrator)
+- `PATCH /admin/users/:id/role`, `PATCH /admin/users/:id/restriction` (administrator)
 - `POST /executions`, `GET /executions/:id`, `POST /executions/:id/cancel`
 - `GET /submissions`
 

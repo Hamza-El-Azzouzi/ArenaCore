@@ -7,7 +7,29 @@ datasource db {
 }
 enum Role {
   USER
+  MODERATOR
   ADMIN
+}
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  SOLUTION_LEAK
+  OFF_TOPIC
+  OTHER
+}
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+enum ProfileVisibility {
+  PUBLIC
+  PRIVATE
+}
+enum ThemePreference {
+  SYSTEM
+  DARK
+  LIGHT
 }
 enum Difficulty {
   EASY
@@ -75,17 +97,39 @@ model User {
   bio          String?
   location     String?
   website      String?
+  avatarUrl    String?
+  profileVisibility ProfileVisibility @default(PUBLIC)
+  themePreference ThemePreference @default(SYSTEM)
+  productNotifications Boolean @default(true)
+  competitionNotifications Boolean @default(true)
+  deactivatedAt DateTime?
+  suspendedUntil DateTime?
+  bannedAt DateTime?
+  restrictionReason String?
   role         Role        @default(USER)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   sessions     Session[]
+  credential   Credential?
   executions   Execution[]
   discussionPosts DiscussionPost[]
   discussionLikes DiscussionLike[]
   discussionRateLimit DiscussionRateLimit?
   competitionRegistrations CompetitionRegistration[]
   ownedCompetitions Competition[] @relation("CompetitionOwner")
+  submittedReports ContentReport[] @relation("ReportReporter")
+  moderatedReports ContentReport[] @relation("ReportModerator")
   @@unique([issuer, subject])
+  @@index([suspendedUntil])
+}
+model Credential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 model Session {
   id            String    @id @default(uuid()) @db.Uuid
@@ -288,9 +332,29 @@ model DiscussionPost {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
   likes     DiscussionLike[]
+  reports   ContentReport[]
   @@index([problemId, parentId, status, createdAt, id])
   @@index([parentId, status, createdAt, id])
   @@index([authorId, createdAt])
+}
+
+model ContentReport {
+  id            String       @id @default(uuid()) @db.Uuid
+  postId        String       @db.Uuid
+  post          DiscussionPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporterId    String       @db.Uuid
+  reporter      User         @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reason        ReportReason
+  details       String?
+  status        ReportStatus @default(PENDING)
+  moderatorId   String?      @db.Uuid
+  moderator     User?        @relation("ReportModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+  moderatorNote String?
+  createdAt     DateTime     @default(now())
+  resolvedAt    DateTime?
+  @@unique([postId, reporterId])
+  @@index([status, createdAt, id])
+  @@index([reporterId, createdAt, id])
 }
 
 model DiscussionLike {

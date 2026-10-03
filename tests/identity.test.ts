@@ -34,7 +34,7 @@ describe('OIDC configuration and login proof encryption', () => {
     expect(parsed.API_ORIGIN).toBe('https://api.example');
   });
   it('encrypts with random IVs and authenticates ciphertext, key and state binding', () => {
-    const key = randomBytes(32), state = 'a'.repeat(64), proof = {verifier: token(), nonce: token()};
+    const key = randomBytes(32), state = 'a'.repeat(64), proof = {provider: 'auth0' as const, verifier: token(), nonce: token()};
     const first = encryptProof(key, state, proof), second = encryptProof(key, state, proof);
     expect(first).not.toBe(second);
     expect(first).not.toContain(proof.verifier);
@@ -47,11 +47,14 @@ describe('OIDC configuration and login proof encryption', () => {
 });
 describe('database-owned RBAC', () => {
   class Handler { @RequireRoles('ADMIN') action() {} }
-  const context = (role?: 'USER'|'ADMIN') => ({getHandler: () => Handler.prototype.action, getClass: () => Handler, switchToHttp: () => ({getRequest: () => ({principal: role ? {role} : undefined})})}) as unknown as ExecutionContext;
+  class ModerationHandler { @RequireRoles('ADMIN','MODERATOR') action() {} }
+  const context = (role?: 'USER'|'MODERATOR'|'ADMIN',moderation=false) => ({getHandler: () => moderation?ModerationHandler.prototype.action:Handler.prototype.action, getClass: () => moderation?ModerationHandler:Handler, switchToHttp: () => ({getRequest: () => ({principal: role ? {role} : undefined})})}) as unknown as ExecutionContext;
   it('requires authentication and the declared role', () => {
     const guard = new RolesGuard(new Reflector());
     expect(() => guard.canActivate(context())).toThrow();
     expect(() => guard.canActivate(context('USER'))).toThrow();
+    expect(() => guard.canActivate(context('MODERATOR'))).toThrow();
     expect(guard.canActivate(context('ADMIN'))).toBe(true);
+    expect(guard.canActivate(context('MODERATOR',true))).toBe(true);
   });
 });

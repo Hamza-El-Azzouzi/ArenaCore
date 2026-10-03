@@ -7,6 +7,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createApp } from '../apps/api/src/bootstrap';
 import { Config } from '../apps/api/src/config/config';
 import { newSessionSecrets } from '../apps/api/src/auth/session';
+import {hashPassword} from '../apps/api/src/auth/password';
 import { seed, sampleProblemId, sampleVersionId } from '../prisma/seed';
 
 // Never run destructive setup against DATABASE_URL. Explicitly opt into a disposable DB.
@@ -21,12 +22,14 @@ integration('real PostgreSQL API integration', () => {
   let cookie: string;
   let otherCookie: string;
   let csrf: string;
+  let otherCsrf: string;
+  let reportId: string;
   let jobId: string;
   const origin = 'http://localhost:3000';
   const input = {problemId: sampleProblemId, language: 'python', mode: 'SUBMIT', sourceCode: 'print(5)'};
   const key = 'integration-request-key-001';
   async function request(path: string, options: RequestInit = {}, asOther = false) {
-    return fetch(`${base}${path}`, {...options, headers: {cookie: asOther ? otherCookie : cookie, origin, 'x-csrf-token': csrf, 'content-type': 'application/json', ...options.headers}});
+    return fetch(`${base}${path}`, {...options, headers: {cookie: asOther ? otherCookie : cookie, origin, 'x-csrf-token': asOther?otherCsrf:csrf, 'content-type': 'application/json', ...options.headers}});
   }
   beforeAll(async () => {
     process.env.DATABASE_URL = url;
@@ -46,6 +49,7 @@ integration('real PostgreSQL API integration', () => {
     cookie = `arenacore_session=${sessions[0]!.token}`;
     otherCookie = `arenacore_session=${sessions[1]!.token}`;
     csrf = sessions[0]!.csrfToken;
+    otherCsrf=sessions[1]!.csrfToken;
     app = await createApp();
     await app.listen(0, '127.0.0.1');
     base = `${await app.getUrl()}/api/v1`;
@@ -149,6 +153,33 @@ integration('real PostgreSQL API integration', () => {
     expect(JSON.stringify(publicProfile)).not.toContain('sourceCode');
     expect((await request('/profiles/me', {method: 'PATCH', body: JSON.stringify({username: 'admin'})})).status).toBe(400);
   });
+  it('persists account preferences, manages sessions, changes passwords, and safely deactivates',async()=>{
+    const email=`account-${crypto.randomUUID()}@example.test`,oldPassword='correct horse battery staple',newPassword='a newer correct horse battery staple';
+    const account=await db.user.create({data:{issuer:'arenacore:password',subject:email,displayName:'Account Owner',credential:{create:{email,passwordHash:await hashPassword(oldPassword)}}},select:{id:true,username:true}});
+    const first=newSessionSecrets(),second=newSessionSecrets();
+    await db.session.createMany({data:[{userId:account.id,tokenHash:first.tokenHash,csrfTokenHash:first.csrfTokenHash,expiresAt:new Date(Date.now()+600_000)},{userId:account.id,tokenHash:second.tokenHash,csrfTokenHash:second.csrfTokenHash,expiresAt:new Date(Date.now()+600_000)}]});
+    const accountRequest=(path:string,options:RequestInit={})=>fetch(`${base}${path}`,{...options,headers:{cookie:`arenacore_session=${first.token}`,origin,'x-csrf-token':first.csrfToken,'content-type':'application/json',...options.headers}});
+    try{
+      expect(await json(await accountRequest('/account/settings'))).toMatchObject({email,hasPassword:true,profileVisibility:'PUBLIC',themePreference:'SYSTEM'});
+      expect((await accountRequest('/account/settings',{method:'PATCH',body:JSON.stringify({profileVisibility:'PRIVATE',themePreference:'LIGHT',productNotifications:false})})).status).toBe(200);
+      expect((await accountRequest(`/profiles/${account.username}`,{headers:{cookie:''}})).status).toBe(404);
+      expect((await accountRequest('/profiles/me')).status).toBe(200);
+      const active=await json<{items:Array<{id:string;current:boolean}>}>(await accountRequest('/account/sessions'));
+      expect(active.items).toHaveLength(2);expect(active.items.filter(item=>item.current)).toHaveLength(1);
+      expect(await json(await accountRequest('/account/sessions',{method:'DELETE'}))).toMatchObject({revoked:1});
+      expect((await accountRequest('/account/password',{method:'PATCH',body:JSON.stringify({currentPassword:'wrong password value',newPassword})})).status).toBe(401);
+      expect((await accountRequest('/account/password',{method:'PATCH',body:JSON.stringify({currentPassword:oldPassword,newPassword})})).status).toBe(200);
+      const changedEmail=`changed-${crypto.randomUUID()}@example.test`;
+      expect((await accountRequest('/account/email',{method:'PATCH',body:JSON.stringify({currentPassword:newPassword,newEmail:changedEmail})})).status).toBe(200);
+      expect(await db.credential.findUnique({where:{email:changedEmail},select:{user:{select:{subject:true}}}})).toMatchObject({user:{subject:changedEmail}});
+      expect((await accountRequest('/account',{method:'DELETE',body:JSON.stringify({confirmation:'DELETE',currentPassword:newPassword})})).status).toBe(200);
+      const deleted=await db.user.findUniqueOrThrow({where:{id:account.id},select:{displayName:true,deactivatedAt:true,credential:true,sessions:{where:{revokedAt:null}}}});
+      expect(deleted).toMatchObject({displayName:'Deleted user',credential:null,sessions:[]});expect(deleted.deactivatedAt).toBeInstanceOf(Date);
+      expect((await accountRequest('/account/settings')).status).toBe(401);
+    }finally{
+      await db.auditEvent.deleteMany({where:{actorId:account.id}});await db.user.delete({where:{id:account.id}}).catch(()=>undefined);
+    }
+  });
   it('creates, lists, replies to and idempotently likes a public discussion', async () => {
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', headers: {cookie: ''}, body: JSON.stringify({title: 'Unauthenticated question', body: 'This must not be accepted.'})})).status).toBe(401);
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', body: JSON.stringify({title: 'Client-selected moderation', body: 'This must not be accepted.', status: 'VISIBLE'})})).status).toBe(400);
@@ -167,6 +198,12 @@ integration('real PostgreSQL API integration', () => {
     const replies = await json<{items: DiscussionPost[]}>(await request(`/discussions/${thread.id}/replies`, {headers: {cookie: ''}}));
     expect(replies.items).toContainEqual(expect.objectContaining({id: reply.id}));
     expect(JSON.stringify(listed)).not.toContain('issuer');
+    const otherThread=await json<DiscussionPost>(await request('/problems/sum-two-numbers/discussions',{method:'POST',body:JSON.stringify({title:'Is this discussion appropriate?',body:'This post is used to verify the real moderation workflow.'})},true));
+    const report=await json<{id:string;status:string}>(await request(`/discussions/${otherThread.id}/reports`,{method:'POST',body:JSON.stringify({reason:'OFF_TOPIC',details:'This discussion does not address the problem statement.'})}));
+    reportId=report.id;
+    expect(report.status).toBe('PENDING');
+    expect((await request(`/discussions/${otherThread.id}/reports`,{method:'POST',body:JSON.stringify({reason:'SPAM'})})).status).toBe(409);
+    expect(await json(await request('/reports/me'))).toMatchObject({items:[{id:reportId,status:'PENDING'}]});
   });
   it('enforces the shared discussion write quota in PostgreSQL', async () => {
     await db.discussionRateLimit.deleteMany({where: {userId: ownerId}});
@@ -249,9 +286,36 @@ integration('real PostgreSQL API integration', () => {
     const overview = await json<{stats:{users:number};recentSubmissions:unknown[]}>(await request('/admin/overview'));
     expect(overview.stats.users).toBeGreaterThanOrEqual(2);
     expect(JSON.stringify(overview)).not.toContain('sourceCode');
+    const analytics=await json<{period:{days:number};stats:{submissions:number;accepted:number;activeUsers:number};daily:Array<{date:string;submissions:number}>;topProblems:unknown[]}>(await request('/admin/analytics?days=30'));
+    expect(analytics.period.days).toBe(30);
+    expect(analytics.daily).toHaveLength(30);
+    expect(analytics.stats.submissions).toBeGreaterThanOrEqual(analytics.stats.accepted);
+    expect(JSON.stringify(analytics)).not.toMatch(/sourceCode|expectedOutput|passwordHash|issuer/);
+    const exported=await json<{filename:string;contentType:string;content:string}>(await request('/admin/analytics/export?days=7'));
+    expect(exported).toMatchObject({contentType:'text/csv'});
+    expect(exported.filename).toMatch(/^arenacore-analytics-.*\.csv$/);
+    expect(exported.content.split('\n')[0]).toBe('"date","submissions","accepted","active_users"');
+    expect((await request('/admin/analytics?days=365')).status).toBe(400);
     const users = await json<{items:Array<{id:string;role:string}>}>(await request('/admin/users'));
     expect(users.items).toContainEqual(expect.objectContaining({id:ownerId,role:'ADMIN'}));
     expect((await request(`/admin/users/${ownerId}/role`, {method:'PATCH',body:JSON.stringify({role:'USER'})})).status).toBe(409);
+    expect(await json(await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'MODERATOR'})}))).toMatchObject({role:'MODERATOR'});
+    const queue=await json<{items:Array<{id:string;post:{body:string}}> }>(await request('/admin/moderation',{},true));
+    expect(queue.items).toContainEqual(expect.objectContaining({id:reportId}));
+    expect(JSON.stringify(queue)).not.toContain('issuer');
+    expect((await request('/admin/users',{},true)).status).toBe(403);
+    expect(await json(await request(`/admin/reports/${reportId}`,{method:'PATCH',body:JSON.stringify({status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',postStatus:'HIDDEN'})},true))).toMatchObject({status:'RESOLVED'});
+    expect((await json<{items:unknown[]}>(await request('/admin/moderation',{},true))).items).toHaveLength(0);
+    await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'USER'})});
+    const until=new Date(Date.now()+60_000).toISOString();
+    expect(await json(await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'SUSPEND',until,reason:'Temporary integration-test restriction.'})}))).toMatchObject({restrictionReason:'Temporary integration-test restriction.'});
+    const restrictedSecrets=newSessionSecrets();
+    await db.session.create({data:{userId:otherId,tokenHash:restrictedSecrets.tokenHash,csrfTokenHash:restrictedSecrets.csrfTokenHash,expiresAt:new Date(Date.now()+600_000)}});
+    const restricted=await request('/submissions',{headers:{cookie:`arenacore_session=${restrictedSecrets.token}`}},true);
+    expect(restricted.status).toBe(403);
+    expect((await json<{error:{code:string}}>(restricted)).error.code).toBe('ACCOUNT_SUSPENDED');
+    expect((await request('/auth/logout',{method:'POST',headers:{cookie:`arenacore_session=${restrictedSecrets.token}`,'x-csrf-token':restrictedSecrets.csrfToken}},true)).status).toBe(200);
+    await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'CLEAR'})});
     const problemSlug=`draft-${crypto.randomUUID()}`;
     const created=await json<{id:string;published:boolean}>(await request('/admin/problems',{method:'POST',body:JSON.stringify({slug:problemSlug,title:'Integration Draft Problem',difficulty:'EASY',tags:['integration'],statementMarkdown:'Read the input and produce the required deterministic output.',constraints:['Input is bounded.'],timeMs:1000,memoryKiB:65536,templates:{java:'class Solution {}',python:'# solution',javascript:'// solution'},tests:[{visibility:'PUBLIC',input:'1\n',expectedOutput:'1\n'},{visibility:'HIDDEN',input:'2\n',expectedOutput:'2\n'}],publish:false})}));
     expect(created.published).toBe(false);

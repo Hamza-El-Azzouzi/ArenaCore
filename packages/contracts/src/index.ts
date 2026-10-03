@@ -40,6 +40,7 @@ export const updateProfileSchema = z.strictObject({
   bio: optionalProfileText(280).optional(),
   location: optionalProfileText(100).optional(),
   website: z.union([z.url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)), z.literal(''), z.null()]).optional(),
+  avatarUrl: z.union([z.url().max(2048).refine(value => new URL(value).protocol === 'https:'), z.literal(''), z.null()]).optional(),
 }).refine(value => Object.keys(value).length > 0, 'At least one profile field is required');
 export const leaderboardQuerySchema = paginationSchema;
 export const discussionQuerySchema = paginationSchema;
@@ -82,7 +83,7 @@ export interface ContributionDay { date: string; count: number; }
 export interface ProfileLanguageStat { language: Language; submissions: number; accepted: number; }
 export interface ProfileDifficultyStat { difficulty: 'EASY' | 'MEDIUM' | 'HARD'; solved: number; total: number; }
 export interface PublicProfile {
-  username: string; displayName: string; bio?: string; location?: string; website?: string; joinedAt: string;
+  username: string; displayName: string; bio?: string; location?: string; website?: string; avatarUrl?: string; joinedAt: string;
   stats: {totalSubmissions: number; acceptedSubmissions: number; successRate: number; problemsSolved: number; currentStreak: number; longestStreak: number; averageRuntimeMs?: number};
   contributions: ContributionDay[]; languages: ProfileLanguageStat[]; difficulties: ProfileDifficultyStat[];
   recentSubmissions: SubmissionSummary[];
