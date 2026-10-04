@@ -42,7 +42,7 @@ suite('durable queue, leases, cancellation, public replay and socket authorizati
   });
   beforeEach(async()=>{
     await Promise.all(workers.splice(0).map(w=>w.close()));sockets.splice(0).forEach(s=>s.disconnect());
-    await queue.obliterate({force:true});await db.execution.deleteMany({where:{userId:{in:[userId,otherId]}}});
+    await queue.obliterate({force:true});await db.execution.deleteMany({where:{userId:{in:[userId,otherId]}}});await db.notification.deleteMany({where:{userId:{in:[userId,otherId]}}});
     await db.session.update({where:{id:sessionId},data:{revokedAt:null,expiresAt:new Date(Date.now()+3600000)}});
   });
   afterAll(async()=>{
@@ -105,7 +105,12 @@ suite('durable queue, leases, cancellation, public replay and socket authorizati
     }},(id,mode)=>loadJudgePlan(db,id,mode));
     worker(backend);await dispatcher.tick();await until(async()=>(await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='FINISHED');
     const stored=await db.execution.findUniqueOrThrow({where:{id:row.id}});expect(stored.verdict).toBe('WRONG_ANSWER');expect(stored.publicResults).toBeNull();
+    const notification=await db.notification.findFirstOrThrow({where:{userId,dedupeKey:`execution:${row.id}:result`}});expect(notification).toMatchObject({kind:'EXECUTION_RESULT',href:'/problems/sum-two-numbers?tab=submissions'});expect(`${notification.title} ${notification.body}`).not.toMatch(/SECRET_HIDDEN|PRIVATE_SOURCE_SENTINEL/);
     const replay=await jobs.replay(userId,row.id,1,0);expect(JSON.stringify(replay)).not.toMatch(/SECRET_HIDDEN|PRIVATE_SOURCE_SENTINEL/);expect(replay.events.some(e=>e.kind==='console_output')).toBe(false);
+  });
+  it('respects the stored product-notification preference for judged submissions',async()=>{
+    await db.user.update({where:{id:userId},data:{productNotifications:false}});
+    try{const row=await fixture('SUBMIT');const lease=(await jobs.claim(row.id))!.lease;expect(await jobs.finish(lease,{verdict:'ACCEPTED'})).toBe(true);expect(await db.notification.count({where:{userId}})).toBe(0);}finally{await db.user.update({where:{id:userId},data:{productNotifications:true}});}
   });
   it('judges public RUN cases and persists only public case results',async()=>{
     const row=await fixture('RUN');const backend=new JudgingBackend({execute:async request=>{

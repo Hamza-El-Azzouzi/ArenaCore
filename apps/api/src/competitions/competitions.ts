@@ -33,11 +33,15 @@ export class Competitions {
   }
 
   async register(userId:string,slug:string) {
-    const competition=await this.db.competition.findFirst({where:{slug,published:true},select:{id:true,startsAt:true,endsAt:true}});
-    if(!competition)throw new ApiError(404,'NOT_FOUND','Competition not found.');
-    if(new Date()>=competition.endsAt)throw new ApiError(409,'REGISTRATION_CLOSED','This competition has finished.');
-    const registration=await this.db.competitionRegistration.upsert({where:{competitionId_userId:{competitionId:competition.id,userId}},create:{competitionId:competition.id,userId},update:{},select:{joinedAt:true}});
-    return {registered:true,joinedAt:registration.joinedAt.toISOString()};
+    return this.db.$transaction(async tx=>{
+      const competition=await tx.competition.findFirst({where:{slug,published:true},select:{id:true,slug:true,kind:true,title:true,startsAt:true,endsAt:true}});
+      if(!competition)throw new ApiError(404,'NOT_FOUND','Competition not found.');
+      if(new Date()>=competition.endsAt)throw new ApiError(409,'REGISTRATION_CLOSED','This competition has finished.');
+      const registration=await tx.competitionRegistration.upsert({where:{competitionId_userId:{competitionId:competition.id,userId}},create:{competitionId:competition.id,userId},update:{},select:{joinedAt:true}});
+      const preferences=await tx.user.findUniqueOrThrow({where:{id:userId},select:{competitionNotifications:true}});
+      if(preferences.competitionNotifications)await tx.notification.createMany({data:[{userId,kind:'COMPETITION_REGISTRATION',title:'Competition registration confirmed',body:`You are registered for ${competition.title}.`,href:`/${competition.kind==='CONTEST'?'contests':'tournaments'}/${competition.slug}`,dedupeKey:`competition:${competition.id}:registration`}],skipDuplicates:true});
+      return {registered:true,joinedAt:registration.joinedAt.toISOString()};
+    });
   }
 
   async registration(userId:string,slug:string){const competition=await this.db.competition.findFirst({where:{slug,published:true},select:{id:true}});if(!competition)throw new ApiError(404,'NOT_FOUND','Competition not found.');const row=await this.db.competitionRegistration.findUnique({where:{competitionId_userId:{competitionId:competition.id,userId}},select:{joinedAt:true}});return row?{registered:true,joinedAt:row.joinedAt.toISOString()}:{registered:false};}

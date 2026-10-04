@@ -180,6 +180,24 @@ integration('real PostgreSQL API integration', () => {
       await db.auditEvent.deleteMany({where:{actorId:account.id}});await db.user.delete({where:{id:account.id}}).catch(()=>undefined);
     }
   });
+  it('isolates, paginates, and updates persisted notifications while respecting competition preferences',async()=>{
+    expect((await request('/notifications',{headers:{cookie:''}})).status).toBe(401);
+    const own=await db.notification.create({data:{userId:ownerId,kind:'PRODUCT',title:'Platform update',body:'A safe product notification.',href:'/problems',dedupeKey:`test:${crypto.randomUUID()}`}});
+    const other=await db.notification.create({data:{userId:otherId,kind:'PRODUCT',title:'Private update',body:'This belongs to another user.',dedupeKey:`test:${crypto.randomUUID()}`}});
+    const first=await json<{items:Array<{id:string;readAt:string|null}>;nextCursor:string|null;unreadCount:number}>(await request('/notifications'));
+    expect(first.items).toContainEqual(expect.objectContaining({id:own.id,readAt:null}));expect(first.items).not.toContainEqual(expect.objectContaining({id:other.id}));expect(first.unreadCount).toBeGreaterThanOrEqual(1);
+    expect((await request(`/notifications?cursor=${other.id}`)).status).toBe(400);
+    expect(await json(await request(`/notifications/${own.id}/read`,{method:'PATCH'}))).toMatchObject({id:own.id,readAt:expect.any(String)});
+    expect((await request(`/notifications/${other.id}/read`,{method:'PATCH'})).status).toBe(404);
+    expect(await json(await request('/notifications/read-all',{method:'PATCH'}))).toMatchObject({updated:expect.any(Number)});
+    expect(await json(await request('/notifications/unread-count'))).toEqual({unreadCount:0});
+    const weekend=await db.competition.findUniqueOrThrow({where:{slug:'weekend-sprint'},select:{id:true}});
+    await request('/competitions/weekend-sprint/register',{method:'POST'});
+    await request('/competitions/weekend-sprint/register',{method:'POST'});
+    expect(await db.notification.count({where:{userId:ownerId,dedupeKey:`competition:${weekend.id}:registration`}})).toBe(1);
+    await db.user.update({where:{id:ownerId},data:{competitionNotifications:false}});
+    try{await request('/competitions/arena-open/register',{method:'POST'});expect(await db.notification.count({where:{userId:ownerId,kind:'COMPETITION_REGISTRATION',href:'/tournaments/arena-open'}})).toBe(0);}finally{await db.user.update({where:{id:ownerId},data:{competitionNotifications:true}});}
+  });
   it('creates, lists, replies to and idempotently likes a public discussion', async () => {
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', headers: {cookie: ''}, body: JSON.stringify({title: 'Unauthenticated question', body: 'This must not be accepted.'})})).status).toBe(401);
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', body: JSON.stringify({title: 'Client-selected moderation', body: 'This must not be accepted.', status: 'VISIBLE'})})).status).toBe(400);

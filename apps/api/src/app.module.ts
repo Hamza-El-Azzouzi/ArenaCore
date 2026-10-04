@@ -9,8 +9,9 @@ import { DiscussionsModule } from './discussions/discussions.module';
 import { AdminModule } from './admin/admin.module';
 import { CompetitionsModule } from './competitions/competitions.module';
 import { AccountModule } from './account/account.module';
+import {NotificationsModule} from './notifications/notifications.module';
 @Module({
-  imports: [DatabaseModule, AuthModule, ExecutionsModule, ProfilesModule, DiscussionsModule, AdminModule, CompetitionsModule, AccountModule],
+  imports: [DatabaseModule, AuthModule, ExecutionsModule, ProfilesModule, DiscussionsModule, AdminModule, CompetitionsModule, AccountModule, NotificationsModule],
   controllers: [HealthController, ProblemsController],
   providers: [Problems],
 })
