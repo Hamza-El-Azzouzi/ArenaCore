@@ -203,7 +203,9 @@ integration('real PostgreSQL API integration', () => {
     reportId=report.id;
     expect(report.status).toBe('PENDING');
     expect((await request(`/discussions/${otherThread.id}/reports`,{method:'POST',body:JSON.stringify({reason:'SPAM'})})).status).toBe(409);
-    expect(await json(await request('/reports/me'))).toMatchObject({items:[{id:reportId,status:'PENDING'}]});
+    const ownReports=await json<{items:unknown[]}>(await request('/reports/me'));
+    expect(ownReports).toMatchObject({items:[{id:reportId,status:'PENDING'}]});
+    expect(JSON.stringify(ownReports)).not.toContain('moderatorNote');
   });
   it('enforces the shared discussion write quota in PostgreSQL', async () => {
     await db.discussionRateLimit.deleteMany({where: {userId: ownerId}});
@@ -306,6 +308,10 @@ integration('real PostgreSQL API integration', () => {
     expect((await request('/admin/users',{},true)).status).toBe(403);
     expect(await json(await request(`/admin/reports/${reportId}`,{method:'PATCH',body:JSON.stringify({status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',postStatus:'HIDDEN'})},true))).toMatchObject({status:'RESOLVED'});
     expect((await json<{items:unknown[]}>(await request('/admin/moderation',{},true))).items).toHaveLength(0);
+    const history=await json<{items:Array<{id:string;status:string;moderatorNote:string;moderator:{username:string}|null}>;nextCursor:string|null}>(await request('/admin/moderation?status=RESOLVED',{},true));
+    expect(history.items).toContainEqual(expect.objectContaining({id:reportId,status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',moderator:expect.objectContaining({username:expect.any(String)})}));
+    expect((await request(`/admin/moderation?cursor=${reportId}`,{},true)).status).toBe(400);
+    expect((await request('/admin/moderation?status=INVALID',{},true)).status).toBe(400);
     await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'USER'})});
     const until=new Date(Date.now()+60_000).toISOString();
     expect(await json(await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'SUSPEND',until,reason:'Temporary integration-test restriction.'})}))).toMatchObject({restrictionReason:'Temporary integration-test restriction.'});

@@ -9,6 +9,7 @@ import {Database} from '../database/database';
 const uuid = z.uuid();
 const cursorQuery = z.strictObject({cursor: uuid.optional()});
 const analyticsQuery=z.strictObject({days:z.coerce.number().int().refine(value=>[7,30,90].includes(value),'Choose a 7, 30, or 90 day period.').default(30)});
+const moderationQuery=z.strictObject({cursor:uuid.optional(),status:z.enum(['PENDING','RESOLVED','DISMISSED']).default('PENDING')});
 const userQuery=z.strictObject({cursor:uuid.optional(),search:z.string().trim().min(2).max(100).optional(),role:z.enum(['USER','MODERATOR','ADMIN']).optional(),restriction:z.enum(['ACTIVE','SUSPENDED','BANNED']).optional()});
 const roleInput = z.strictObject({role: z.enum(['USER', 'MODERATOR','ADMIN'])});
 const moderationInput = z.strictObject({status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED'])});
@@ -135,9 +136,12 @@ export class AdminService {
     return {id:row.id,slug:row.slug,currentVersionId:row.currentVersionId,version:{...version,templates:version.templates}};
   }
 
-  async moderation() {
-    const rows=await this.db.contentReport.findMany({where:{status:'PENDING'},select:{id:true,reason:true,details:true,status:true,createdAt:true,reporter:{select:{username:true,displayName:true}},post:{select:{id:true,title:true,body:true,status:true,createdAt:true,author:{select:{id:true,username:true,displayName:true}},problem:{select:{slug:true,currentVersion:{select:{title:true}}}}}}},orderBy:[{createdAt:'asc'},{id:'asc'}],take:100});
-    return {items:rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),post:{...row.post,createdAt:row.post.createdAt.toISOString(),problem:{slug:row.post.problem.slug,title:row.post.problem.currentVersion?.title??row.post.problem.slug}}}))};
+  async moderation(query:z.infer<typeof moderationQuery>) {
+    const boundary=query.cursor?await this.db.contentReport.findFirst({where:{id:query.cursor,status:query.status},select:{id:true,createdAt:true}}):null;
+    if(query.cursor&&!boundary)throw new ApiError(400,'INVALID_CURSOR','Moderation cursor is invalid.');
+    const rows=await this.db.contentReport.findMany({where:{status:query.status,...pageBoundary(boundary)},select:{id:true,reason:true,details:true,status:true,moderatorNote:true,createdAt:true,resolvedAt:true,moderator:{select:{username:true,displayName:true}},reporter:{select:{username:true,displayName:true}},post:{select:{id:true,title:true,body:true,status:true,createdAt:true,author:{select:{id:true,username:true,displayName:true}},problem:{select:{slug:true,currentVersion:{select:{title:true}}}}}}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:51});
+    const items=rows.slice(0,50).map(row=>({...row,createdAt:row.createdAt.toISOString(),resolvedAt:row.resolvedAt?.toISOString()??null,post:{...row.post,createdAt:row.post.createdAt.toISOString(),problem:{slug:row.post.problem.slug,title:row.post.problem.currentVersion?.title??row.post.problem.slug}}}));
+    return {items,nextCursor:rows.length>50?items.at(-1)!.id:null};
   }
 
   async competitions() {
@@ -257,7 +261,7 @@ export class AdminController {
   @Get('submissions') submissions(@Query() query:unknown){return this.admin.submissions(validate(cursorQuery,query).cursor);}
   @Get('problems') problems(){return this.admin.problems();}
   @Get('problems/:id') problem(@Param('id') id:string){return this.admin.problem(validate(uuid,id));}
-  @Get('moderation') @RequireRoles('ADMIN','MODERATOR') moderation(){return this.admin.moderation();}
+  @Get('moderation') @RequireRoles('ADMIN','MODERATOR') moderation(@Query() query:unknown){return this.admin.moderation(validate(moderationQuery,query));}
   @Get('competitions') competitions(){return this.admin.competitions();}
   @Patch('users/:id/role') setRole(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setRole(req.principal.userId,validate(uuid,id),validate(roleInput,body).role);}
   @Patch('users/:id/restriction') restrict(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.restrict(req.principal.userId,validate(uuid,id),validate(restrictionInput,body));}
