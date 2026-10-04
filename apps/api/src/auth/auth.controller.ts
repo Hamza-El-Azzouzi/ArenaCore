@@ -8,18 +8,20 @@ import { LoginService, LOGIN_TTL_SECONDS } from './login.service';
 import { Database } from '../database/database';
 import { AllowRestricted, AuthenticatedRequest, Sessions, SessionGuard } from './session';
 import { PasswordAuthService } from './password-auth.service';
+import { usernameSchema } from '@arenacore/contracts';
 
 const email = z.string().trim().toLowerCase().email().max(254);
 const password = z.string().min(12).max(128).refine(value => Buffer.byteLength(value, 'utf8') <= 256);
 const displayName = z.string().trim().min(2).max(120).refine(value => !/[\u0000-\u001f\u007f]/.test(value));
+const returnTo = z.string().max(500).refine(value => value.startsWith('/') && !value.startsWith('//') && !value.includes('\\'), 'Return path must stay within ArenaCore');
 
 @Controller()
 export class AuthController {
   constructor(@Inject(Sessions) private readonly sessions: Sessions, @Inject(Database) private readonly db: Database, @Inject(Config) private readonly config: Config, @Inject(LoginService) private readonly loginService: LoginService, @Inject(PasswordAuthService) private readonly passwordAuth: PasswordAuthService) {}
   @Get('auth/login')
   async login(@Req() req: Request, @Query() query: unknown, @Res() res: Response) {
-    const {provider} = validate(z.strictObject({provider: z.enum(['auth0', 'google', 'github']).default('auth0')}), query);
-    const {location, browserToken} = await this.loginService.begin(req, provider);
+    const {provider,returnTo:path} = validate(z.strictObject({provider: z.enum(['auth0', 'google', 'github']).default('auth0'),returnTo:returnTo.default('/problems')}), query);
+    const {location, browserToken} = await this.loginService.begin(req, provider,path);
     res.setHeader('Set-Cookie', serialize(this.config.loginCookieName, browserToken, {httpOnly: true, secure: this.config.secureCookies, sameSite: 'lax', path: '/', maxAge: LOGIN_TTL_SECONDS}));
     res.redirect(302, location);
   }
@@ -30,7 +32,7 @@ export class AuthController {
   @Post('auth/register')
   @HttpCode(201)
   async register(@Req() req: Request, @Body() body: unknown, @Res({passthrough: true}) res: Response) {
-    const input = validate(z.strictObject({email, password, displayName}), body);
+    const input = validate(z.strictObject({email, password, displayName,username:usernameSchema}), body);
     const session = await this.passwordAuth.register(req, input);
     this.setSessionCookie(res, session);
     return {ok: true};
@@ -51,12 +53,18 @@ export class AuthController {
       error: z.string().min(1).max(100).optional(), error_description: z.string().max(512).optional(),
       error_uri: z.string().max(512).optional(), iss: z.string().max(2048).optional(), session_state: z.string().max(512).optional(),
     }).refine(value => Boolean(value.code) !== Boolean(value.error), 'Exactly one code or error is required'), query);
-    const session = await this.loginService.finish(req, Object.fromEntries(Object.entries(params).filter((entry): entry is [string, string] => entry[1] !== undefined)));
+    let session;
+    try {session = await this.loginService.finish(req, Object.fromEntries(Object.entries(params).filter((entry): entry is [string, string] => entry[1] !== undefined)));}
+    catch (error) {
+      if (!params.error||!(error instanceof ApiError)||error.getStatus()!==401) throw error;
+      res.setHeader('Set-Cookie',serialize(this.config.loginCookieName,'',{httpOnly:true,secure:this.config.secureCookies,sameSite:'lax',path:'/',maxAge:0}));
+      return res.redirect(302,`${this.config.values.PUBLIC_ORIGIN}/sign-in?authError=provider`);
+    }
     res.setHeader('Set-Cookie', [
       serialize(this.config.cookieName, session.token, {httpOnly: true, secure: this.config.secureCookies, sameSite: 'lax', path: '/', maxAge: this.config.values.SESSION_TTL_SECONDS, expires: session.expiresAt}),
       serialize(this.config.loginCookieName, '', {httpOnly: true, secure: this.config.secureCookies, sameSite: 'lax', path: '/', maxAge: 0}),
     ]);
-    res.redirect(302, `${this.config.values.PUBLIC_ORIGIN}/problems`);
+    res.redirect(302, `${this.config.values.PUBLIC_ORIGIN}${session.returnTo}`);
   }
   @Get('me')
   async me(@Req() req: Request, @Res({passthrough: true}) res: Response) {

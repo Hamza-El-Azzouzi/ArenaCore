@@ -5,7 +5,7 @@ import { ApiError } from '../common/errors';
 
 export interface VerifiedIdentity { issuer: string; subject: string; displayName: string }
 export type SocialProvider = 'auth0' | 'google' | 'github';
-export interface LoginProof { provider: SocialProvider; verifier: string; nonce: string }
+export interface LoginProof { provider: SocialProvider; verifier: string; nonce: string;returnTo?:string }
 
 @Injectable()
 export class OidcGateway {

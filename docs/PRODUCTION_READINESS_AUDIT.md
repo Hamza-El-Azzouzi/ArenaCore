@@ -6,21 +6,21 @@ This file tracks the end-to-end completion audit. A feature is complete only whe
 
 - Durable PostgreSQL execution records, idempotent admission, transactional outbox, leases, fencing, cancellation, recovery, and safe public projections.
 - Dedicated gVisor runner with pinned runtime images, filesystem/network/process/resource isolation, cleanup verification, and host acceptance scripts.
-- Native password, Auth0/OIDC, Google OIDC, and GitHub OAuth sign-in with server sessions, CSRF protection, exact-origin CORS, database-owned roles, and bounded login attempts.
+- Native username/email/password registration and sign-in, plus direct Google OIDC, GitHub OAuth, and compatible Auth0/OIDC, with safe internal return paths, friendly provider cancellation, server sessions, CSRF protection, exact-origin CORS, database-owned roles, and bounded login attempts.
 - Published immutable problem versions, public/hidden test cases, STDIN and file input modes, language templates, judging, submissions, and realtime replay.
 - Public profiles, derived statistics, leaderboard, discussions, competitions, organizer controls, and administrator problem/competition lifecycle actions.
 - Application/runner deployment automation, encrypted off-host backups, restore drill, and separate network boundaries.
 - Account self-service: avatar URL, profile privacy, persisted theme and notification preferences, native email/password changes, active-session revocation, and anonymizing deactivation.
+- Persisted owner-scoped notifications: bounded cursor pagination, unread counts, individual/all read state, preference-aware execution-result and competition-registration producers, a responsive inbox, and header badge are connected end to end.
 - Moderation foundation: distinct moderator authorization, user discussion reports, ownership-safe report history, required review notes, resolution audit records, timed suspensions, bans, session revocation, and centralized restriction enforcement.
 - Administrator user search, role/status filters, bounded cursor pagination, staff-only resolution history, and atomic bulk moderation with per-report audit records are connected end to end.
 - Production frontend paths: mock sessions/data/executions are removed; admin analytics use bounded database aggregates with CSV export; unsupported decorative admin settings/invitation forms redirect to working account and user management screens.
-- Browser gate foundation: Chromium verifies public navigation, inline problem discussion/submission tabs, native and provider sign-in controls, competition registration and organizer views, account preference/session mutations, moderation, administrator user filtering, analytics export, file-input problem publication, competition publication, and obsolete-route redirects using intercepted API contracts.
+- Browser gate foundation: Chromium verifies public navigation, inline problem discussion/submission tabs, native and provider sign-in controls, competition registration and organizer views, account preference/session mutations, notification read workflows, moderation, administrator user filtering, analytics export, file-input problem publication, competition publication, and obsolete-route redirects using intercepted API contracts.
 
 ## Remaining production work
 
 ### P1 — user engagement
 
-- Add a persisted notification model, unread counts, notification center, read state, and competition/execution event producers. Respect the stored notification preferences.
 - Add bookmarks for problems and a personal dashboard with recent activity, registered events, upcoming rounds, and saved problems.
 - Add bounded global search across published problems, public users, and published competitions.
 - Add report/block controls to the profile and discussion UI after moderation APIs exist.
