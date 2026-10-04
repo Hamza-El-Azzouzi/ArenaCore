@@ -119,6 +119,7 @@ model User {
   ownedCompetitions Competition[] @relation("CompetitionOwner")
   submittedReports ContentReport[] @relation("ReportReporter")
   moderatedReports ContentReport[] @relation("ReportModerator")
+  notifications Notification[]
   @@unique([issuer, subject])
   @@index([suspendedUntil])
 }
@@ -315,6 +316,22 @@ model AuditEvent {
   targetId  String?  @db.Uuid
   createdAt DateTime @default(now())
   @@index([createdAt])
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String    @db.VarChar(50)
+  title     String    @db.VarChar(160)
+  body      String    @db.VarChar(500)
+  href      String?   @db.VarChar(500)
+  dedupeKey String?   @db.VarChar(200)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt, id])
+  @@index([userId, createdAt, id])
 }
 
 model DiscussionPost {

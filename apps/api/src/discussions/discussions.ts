@@ -113,7 +113,7 @@ export class Discussions {
   }
 
   async reports(userId:string){
-    const rows=await this.db.contentReport.findMany({where:{reporterId:userId},select:{id:true,reason:true,status:true,details:true,moderatorNote:true,createdAt:true,resolvedAt:true,post:{select:{id:true,title:true,problem:{select:{slug:true,currentVersion:{select:{title:true}}}}}}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100});
+    const rows=await this.db.contentReport.findMany({where:{reporterId:userId},select:{id:true,reason:true,status:true,details:true,createdAt:true,resolvedAt:true,post:{select:{id:true,title:true,problem:{select:{slug:true,currentVersion:{select:{title:true}}}}}}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100});
     return {items:rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),resolvedAt:row.resolvedAt?.toISOString()??null,post:{id:row.post.id,title:row.post.title,problem:{slug:row.post.problem.slug,title:row.post.problem.currentVersion?.title??row.post.problem.slug}}}))};
   }
 }

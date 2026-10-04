@@ -180,6 +180,24 @@ integration('real PostgreSQL API integration', () => {
       await db.auditEvent.deleteMany({where:{actorId:account.id}});await db.user.delete({where:{id:account.id}}).catch(()=>undefined);
     }
   });
+  it('isolates, paginates, and updates persisted notifications while respecting competition preferences',async()=>{
+    expect((await request('/notifications',{headers:{cookie:''}})).status).toBe(401);
+    const own=await db.notification.create({data:{userId:ownerId,kind:'PRODUCT',title:'Platform update',body:'A safe product notification.',href:'/problems',dedupeKey:`test:${crypto.randomUUID()}`}});
+    const other=await db.notification.create({data:{userId:otherId,kind:'PRODUCT',title:'Private update',body:'This belongs to another user.',dedupeKey:`test:${crypto.randomUUID()}`}});
+    const first=await json<{items:Array<{id:string;readAt:string|null}>;nextCursor:string|null;unreadCount:number}>(await request('/notifications'));
+    expect(first.items).toContainEqual(expect.objectContaining({id:own.id,readAt:null}));expect(first.items).not.toContainEqual(expect.objectContaining({id:other.id}));expect(first.unreadCount).toBeGreaterThanOrEqual(1);
+    expect((await request(`/notifications?cursor=${other.id}`)).status).toBe(400);
+    expect(await json(await request(`/notifications/${own.id}/read`,{method:'PATCH'}))).toMatchObject({id:own.id,readAt:expect.any(String)});
+    expect((await request(`/notifications/${other.id}/read`,{method:'PATCH'})).status).toBe(404);
+    expect(await json(await request('/notifications/read-all',{method:'PATCH'}))).toMatchObject({updated:expect.any(Number)});
+    expect(await json(await request('/notifications/unread-count'))).toEqual({unreadCount:0});
+    const weekend=await db.competition.findUniqueOrThrow({where:{slug:'weekend-sprint'},select:{id:true}});
+    await request('/competitions/weekend-sprint/register',{method:'POST'});
+    await request('/competitions/weekend-sprint/register',{method:'POST'});
+    expect(await db.notification.count({where:{userId:ownerId,dedupeKey:`competition:${weekend.id}:registration`}})).toBe(1);
+    await db.user.update({where:{id:ownerId},data:{competitionNotifications:false}});
+    try{await request('/competitions/arena-open/register',{method:'POST'});expect(await db.notification.count({where:{userId:ownerId,kind:'COMPETITION_REGISTRATION',href:'/tournaments/arena-open'}})).toBe(0);}finally{await db.user.update({where:{id:ownerId},data:{competitionNotifications:true}});}
+  });
   it('creates, lists, replies to and idempotently likes a public discussion', async () => {
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', headers: {cookie: ''}, body: JSON.stringify({title: 'Unauthenticated question', body: 'This must not be accepted.'})})).status).toBe(401);
     expect((await request('/problems/sum-two-numbers/discussions', {method: 'POST', body: JSON.stringify({title: 'Client-selected moderation', body: 'This must not be accepted.', status: 'VISIBLE'})})).status).toBe(400);
@@ -203,7 +221,9 @@ integration('real PostgreSQL API integration', () => {
     reportId=report.id;
     expect(report.status).toBe('PENDING');
     expect((await request(`/discussions/${otherThread.id}/reports`,{method:'POST',body:JSON.stringify({reason:'SPAM'})})).status).toBe(409);
-    expect(await json(await request('/reports/me'))).toMatchObject({items:[{id:reportId,status:'PENDING'}]});
+    const ownReports=await json<{items:unknown[]}>(await request('/reports/me'));
+    expect(ownReports).toMatchObject({items:[{id:reportId,status:'PENDING'}]});
+    expect(JSON.stringify(ownReports)).not.toContain('moderatorNote');
   });
   it('enforces the shared discussion write quota in PostgreSQL', async () => {
     await db.discussionRateLimit.deleteMany({where: {userId: ownerId}});
@@ -306,6 +326,21 @@ integration('real PostgreSQL API integration', () => {
     expect((await request('/admin/users',{},true)).status).toBe(403);
     expect(await json(await request(`/admin/reports/${reportId}`,{method:'PATCH',body:JSON.stringify({status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',postStatus:'HIDDEN'})},true))).toMatchObject({status:'RESOLVED'});
     expect((await json<{items:unknown[]}>(await request('/admin/moderation',{},true))).items).toHaveLength(0);
+    const history=await json<{items:Array<{id:string;status:string;moderatorNote:string;moderator:{username:string}|null}>;nextCursor:string|null}>(await request('/admin/moderation?status=RESOLVED',{},true));
+    expect(history.items).toContainEqual(expect.objectContaining({id:reportId,status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',moderator:expect.objectContaining({username:expect.any(String)})}));
+    expect((await request(`/admin/moderation?cursor=${reportId}`,{},true)).status).toBe(400);
+    expect((await request('/admin/moderation?status=INVALID',{},true)).status).toBe(400);
+    const bulkPosts=await Promise.all(['First bulk review target','Second bulk review target'].map((title,index)=>db.discussionPost.create({data:{problemId:sampleProblemId,authorId:ownerId,title,body:`Bulk moderation body ${index}.`}})));
+    const bulkReports=await Promise.all(bulkPosts.map((post,index)=>db.contentReport.create({data:{postId:post.id,reporterId:otherId,reason:'SPAM',details:`Bulk report ${index}.`}})));
+    const bulkDecision=await json<{items:Array<{id:string;status:string}>}>(await request('/admin/reports',{method:'PATCH',body:JSON.stringify({reportIds:bulkReports.map(report=>report.id),status:'DISMISSED',moderatorNote:'Reviewed together as the same benign pattern.'})}));
+    expect(bulkDecision.items).toHaveLength(2);
+    expect(bulkDecision.items.every(item=>item.status==='DISMISSED')).toBe(true);
+    expect(await db.auditEvent.count({where:{targetId:{in:bulkReports.map(report=>report.id)},action:'CONTENT_REPORT_DISMISSED'}})).toBe(2);
+    const pendingPost=await db.discussionPost.create({data:{problemId:sampleProblemId,authorId:ownerId,title:'Atomic bulk target',body:'This report must remain pending after a mixed-state request.'}});
+    const pendingReport=await db.contentReport.create({data:{postId:pendingPost.id,reporterId:otherId,reason:'OTHER'}});
+    expect((await request('/admin/reports',{method:'PATCH',body:JSON.stringify({reportIds:[bulkReports[0]!.id,pendingReport.id],status:'RESOLVED',moderatorNote:'This mixed decision must roll back.'})})).status).toBe(409);
+    expect(await db.contentReport.findUniqueOrThrow({where:{id:pendingReport.id},select:{status:true}})).toMatchObject({status:'PENDING'});
+    expect((await request('/admin/reports',{method:'PATCH',body:JSON.stringify({reportIds:[pendingReport.id,pendingReport.id],status:'DISMISSED',moderatorNote:'Duplicate identifiers are invalid.'})})).status).toBe(400);
     await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'USER'})});
     const until=new Date(Date.now()+60_000).toISOString();
     expect(await json(await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'SUSPEND',until,reason:'Temporary integration-test restriction.'})}))).toMatchObject({restrictionReason:'Temporary integration-test restriction.'});
