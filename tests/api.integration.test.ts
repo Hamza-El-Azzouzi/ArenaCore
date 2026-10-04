@@ -312,6 +312,17 @@ integration('real PostgreSQL API integration', () => {
     expect(history.items).toContainEqual(expect.objectContaining({id:reportId,status:'RESOLVED',moderatorNote:'Reviewed and hidden because it was unrelated.',moderator:expect.objectContaining({username:expect.any(String)})}));
     expect((await request(`/admin/moderation?cursor=${reportId}`,{},true)).status).toBe(400);
     expect((await request('/admin/moderation?status=INVALID',{},true)).status).toBe(400);
+    const bulkPosts=await Promise.all(['First bulk review target','Second bulk review target'].map((title,index)=>db.discussionPost.create({data:{problemId:sampleProblemId,authorId:ownerId,title,body:`Bulk moderation body ${index}.`}})));
+    const bulkReports=await Promise.all(bulkPosts.map((post,index)=>db.contentReport.create({data:{postId:post.id,reporterId:otherId,reason:'SPAM',details:`Bulk report ${index}.`}})));
+    const bulkDecision=await json<{items:Array<{id:string;status:string}>}>(await request('/admin/reports',{method:'PATCH',body:JSON.stringify({reportIds:bulkReports.map(report=>report.id),status:'DISMISSED',moderatorNote:'Reviewed together as the same benign pattern.'})}));
+    expect(bulkDecision.items).toHaveLength(2);
+    expect(bulkDecision.items.every(item=>item.status==='DISMISSED')).toBe(true);
+    expect(await db.auditEvent.count({where:{targetId:{in:bulkReports.map(report=>report.id)},action:'CONTENT_REPORT_DISMISSED'}})).toBe(2);
+    const pendingPost=await db.discussionPost.create({data:{problemId:sampleProblemId,authorId:ownerId,title:'Atomic bulk target',body:'This report must remain pending after a mixed-state request.'}});
+    const pendingReport=await db.contentReport.create({data:{postId:pendingPost.id,reporterId:otherId,reason:'OTHER'}});
+    expect((await request('/admin/reports',{method:'PATCH',body:JSON.stringify({reportIds:[bulkReports[0]!.id,pendingReport.id],status:'RESOLVED',moderatorNote:'This mixed decision must roll back.'})})).status).toBe(409);
+    expect(await db.contentReport.findUniqueOrThrow({where:{id:pendingReport.id},select:{status:true}})).toMatchObject({status:'PENDING'});
+    expect((await request('/admin/reports',{method:'PATCH',body:JSON.stringify({reportIds:[pendingReport.id,pendingReport.id],status:'DISMISSED',moderatorNote:'Duplicate identifiers are invalid.'})})).status).toBe(400);
     await request(`/admin/users/${otherId}/role`,{method:'PATCH',body:JSON.stringify({role:'USER'})});
     const until=new Date(Date.now()+60_000).toISOString();
     expect(await json(await request(`/admin/users/${otherId}/restriction`,{method:'PATCH',body:JSON.stringify({action:'SUSPEND',until,reason:'Temporary integration-test restriction.'})}))).toMatchObject({restrictionReason:'Temporary integration-test restriction.'});

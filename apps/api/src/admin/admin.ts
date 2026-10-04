@@ -14,6 +14,7 @@ const userQuery=z.strictObject({cursor:uuid.optional(),search:z.string().trim().
 const roleInput = z.strictObject({role: z.enum(['USER', 'MODERATOR','ADMIN'])});
 const moderationInput = z.strictObject({status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED'])});
 const resolveReportInput=z.strictObject({status:z.enum(['RESOLVED','DISMISSED']),moderatorNote:z.string().trim().min(3).max(1000),postStatus:z.enum(['VISIBLE','HIDDEN','DELETED']).optional()});
+const bulkResolveReportsInput=resolveReportInput.extend({reportIds:z.array(uuid).min(1).max(25).refine(ids=>new Set(ids).size===ids.length,'Report IDs must be unique')});
 const restrictionInput=z.discriminatedUnion('action',[
   z.strictObject({action:z.literal('SUSPEND'),until:z.iso.datetime(),reason:z.string().trim().min(3).max(500)}),
   z.strictObject({action:z.literal('BAN'),reason:z.string().trim().min(3).max(500)}),
@@ -177,10 +178,27 @@ export class AdminService {
   }
 
   async resolveReport(actorId:string,reportId:string,input:z.infer<typeof resolveReportInput>){
-    const report=await this.db.contentReport.findUnique({where:{id:reportId},select:{id:true,status:true,postId:true}});
-    if(!report)throw new ApiError(404,'NOT_FOUND','Report not found.');
-    if(report.status!=='PENDING')throw new ApiError(409,'REPORT_ALREADY_REVIEWED','This report has already been reviewed.');
-    return this.db.$transaction(async tx=>{if(input.postStatus)await tx.discussionPost.update({where:{id:report.postId},data:{status:input.postStatus}});const updated=await tx.contentReport.update({where:{id:reportId},data:{status:input.status,moderatorId:actorId,moderatorNote:input.moderatorNote,resolvedAt:new Date()},select:{id:true,status:true,resolvedAt:true}});await tx.auditEvent.create({data:{actorId,action:`CONTENT_REPORT_${input.status}`,targetId:reportId}});return {...updated,resolvedAt:updated.resolvedAt!.toISOString()};});
+    return (await this.resolveReportsAtomic(actorId,[reportId],input))[0]!;
+  }
+
+  async bulkResolveReports(actorId:string,input:z.infer<typeof bulkResolveReportsInput>){
+    const {reportIds,...decision}=input;
+    return {items:await this.resolveReportsAtomic(actorId,reportIds,decision)};
+  }
+
+  private async resolveReportsAtomic(actorId:string,reportIds:string[],input:z.infer<typeof resolveReportInput>){
+    const ids=[...reportIds].sort();
+    return this.db.$transaction(async tx=>{
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "ContentReport" WHERE id IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY id FOR UPDATE`);
+      const reports=await tx.contentReport.findMany({where:{id:{in:ids}},select:{id:true,status:true,postId:true}});
+      if(reports.length!==ids.length)throw new ApiError(404,'NOT_FOUND','One or more reports were not found.');
+      if(reports.some(report=>report.status!=='PENDING'))throw new ApiError(409,'REPORT_ALREADY_REVIEWED','One or more reports have already been reviewed.');
+      const resolvedAt=new Date();
+      if(input.postStatus)await tx.discussionPost.updateMany({where:{id:{in:[...new Set(reports.map(report=>report.postId))]}},data:{status:input.postStatus}});
+      await tx.contentReport.updateMany({where:{id:{in:ids},status:'PENDING'},data:{status:input.status,moderatorId:actorId,moderatorNote:input.moderatorNote,resolvedAt}});
+      await tx.auditEvent.createMany({data:ids.map(id=>({actorId,action:`CONTENT_REPORT_${input.status}`,targetId:id}))});
+      return ids.map(id=>({id,status:input.status,resolvedAt:resolvedAt.toISOString()}));
+    });
   }
 
   async createProblem(actorId:string,input:z.infer<typeof createProblemInput>) {
@@ -265,6 +283,7 @@ export class AdminController {
   @Get('competitions') competitions(){return this.admin.competitions();}
   @Patch('users/:id/role') setRole(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.setRole(req.principal.userId,validate(uuid,id),validate(roleInput,body).role);}
   @Patch('users/:id/restriction') restrict(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.restrict(req.principal.userId,validate(uuid,id),validate(restrictionInput,body));}
+  @Patch('reports') @RequireRoles('ADMIN','MODERATOR') bulkResolveReports(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.admin.bulkResolveReports(req.principal.userId,validate(bulkResolveReportsInput,body));}
   @Patch('reports/:id') @RequireRoles('ADMIN','MODERATOR') resolveReport(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.resolveReport(req.principal.userId,validate(uuid,id),validate(resolveReportInput,body));}
   @Patch('discussions/:id/status') @RequireRoles('ADMIN','MODERATOR') moderate(@Req() req:AuthenticatedRequest,@Param('id') id:string,@Body() body:unknown){return this.admin.moderate(req.principal.userId,validate(uuid,id),validate(moderationInput,body).status);}
   @Post('problems') createProblem(@Req() req:AuthenticatedRequest,@Body() body:unknown){return this.admin.createProblem(req.principal.userId,validate(createProblemInput,body));}

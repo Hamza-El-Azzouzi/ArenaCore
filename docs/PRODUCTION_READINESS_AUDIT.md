@@ -12,15 +12,11 @@ This file tracks the end-to-end completion audit. A feature is complete only whe
 - Application/runner deployment automation, encrypted off-host backups, restore drill, and separate network boundaries.
 - Account self-service: avatar URL, profile privacy, persisted theme and notification preferences, native email/password changes, active-session revocation, and anonymizing deactivation.
 - Moderation foundation: distinct moderator authorization, user discussion reports, ownership-safe report history, required review notes, resolution audit records, timed suspensions, bans, session revocation, and centralized restriction enforcement.
-- Administrator user search, role/status filters, bounded cursor pagination, and staff-only moderation resolution history are connected end to end.
+- Administrator user search, role/status filters, bounded cursor pagination, staff-only resolution history, and atomic bulk moderation with per-report audit records are connected end to end.
 - Production frontend paths: mock sessions/data/executions are removed; admin analytics use bounded database aggregates with CSV export; unsupported decorative admin settings/invitation forms redirect to working account and user management screens.
 - Browser gate foundation: Chromium verifies public navigation, inline problem discussion/submission tabs, native and provider sign-in controls, persistent administrator navigation, live analytics export, and obsolete-route redirects using intercepted API contracts.
 
 ## Remaining production work
-
-### P0 — authorization and moderation
-
-- Add bulk moderation only after individual state transitions and audit invariants are tested.
 
 ### P0 — remove prototype paths
 
