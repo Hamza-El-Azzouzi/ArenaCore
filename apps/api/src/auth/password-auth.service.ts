@@ -13,16 +13,20 @@ export class PasswordAuthService {
   private enabled() {
     if (!this.config.passwordAuthEnabled) throw new ApiError(503, 'IDENTITY_NOT_CONFIGURED', 'Email sign-in is not available yet.');
   }
-  async register(req: Request, input: {email: string; password: string; displayName: string}) {
+  async register(req: Request, input: {email: string; password: string; displayName: string;username:string}) {
     this.enabled(); await this.login.protect(req, true);
     const email = input.email.trim().toLowerCase();
     const passwordHash = await hashPassword(input.password);
     let userId: string;
     try {
-      const user = await this.db.user.create({data: {issuer: 'arenacore:password', subject: email, displayName: input.displayName.trim(), credential: {create: {email, passwordHash}}}, select: {id: true}});
+      const user = await this.db.user.create({data: {issuer: 'arenacore:password', subject: email,username:input.username.trim().toLowerCase(), displayName: input.displayName.trim(), credential: {create: {email, passwordHash}}}, select: {id: true}});
       userId = user.id;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ApiError(409, 'ACCOUNT_EXISTS', 'An account already uses this email. Sign in instead.');
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target=Array.isArray(error.meta?.target)?error.meta.target.map(String):[];
+        if(target.includes('username'))throw new ApiError(409,'USERNAME_TAKEN','That username is already in use.');
+        throw new ApiError(409, 'ACCOUNT_EXISTS', 'An account already uses this email. Sign in instead.');
+      }
       throw error;
     }
     return this.login.issueUser(req, userId, 'AUTH_PASSWORD_REGISTER');

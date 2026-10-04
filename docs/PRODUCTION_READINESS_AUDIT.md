@@ -6,7 +6,7 @@ This file tracks the end-to-end completion audit. A feature is complete only whe
 
 - Durable PostgreSQL execution records, idempotent admission, transactional outbox, leases, fencing, cancellation, recovery, and safe public projections.
 - Dedicated gVisor runner with pinned runtime images, filesystem/network/process/resource isolation, cleanup verification, and host acceptance scripts.
-- Native password, Auth0/OIDC, Google OIDC, and GitHub OAuth sign-in with server sessions, CSRF protection, exact-origin CORS, database-owned roles, and bounded login attempts.
+- Native username/email/password registration and sign-in, plus direct Google OIDC, GitHub OAuth, and compatible Auth0/OIDC, with safe internal return paths, friendly provider cancellation, server sessions, CSRF protection, exact-origin CORS, database-owned roles, and bounded login attempts.
 - Published immutable problem versions, public/hidden test cases, STDIN and file input modes, language templates, judging, submissions, and realtime replay.
 - Public profiles, derived statistics, leaderboard, discussions, competitions, organizer controls, and administrator problem/competition lifecycle actions.
 - Application/runner deployment automation, encrypted off-host backups, restore drill, and separate network boundaries.

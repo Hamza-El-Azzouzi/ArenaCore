@@ -44,11 +44,11 @@ export class LoginService {
     await this.limit(req.ip ?? req.socket.remoteAddress ?? 'unknown');
     return key;
   }
-  async begin(req: Request, provider: SocialProvider = 'auth0') {
+  async begin(req: Request, provider: SocialProvider = 'auth0',returnTo='/problems') {
     const key = await this.protect(req);
     const state = randomBytes(32).toString('base64url');
     const browserToken = randomBytes(32).toString('base64url');
-    const proof = {provider, verifier: randomBytes(32).toString('base64url'), nonce: randomBytes(32).toString('base64url')};
+    const proof = {provider, verifier: randomBytes(32).toString('base64url'), nonce: randomBytes(32).toString('base64url'),returnTo};
     const location = provider === 'github' ? this.github.authorizationUrl(state, proof) : await this.oidc.authorizationUrl(state, proof);
     const stateHash = hashToken(state);
     const oldBrowserToken = parse(req.headers.cookie ?? '')[this.config.loginCookieName];
@@ -75,7 +75,7 @@ export class LoginService {
     const callback = new URL(this.config.callbackUrl);
     callback.search = new URLSearchParams(params).toString();
     const identity = proof.provider === 'github' ? await this.github.exchange(callback, state, proof) : await this.oidc.exchange(callback, state, proof);
-    return this.issueIdentity(req, identity);
+    return {...await this.issueIdentity(req, identity),returnTo:proof.returnTo??'/problems'};
   }
   async issueIdentity(req: Request, identity: VerifiedIdentity) {
     const session = newSessionSecrets();

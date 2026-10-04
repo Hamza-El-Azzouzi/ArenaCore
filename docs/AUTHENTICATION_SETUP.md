@@ -22,8 +22,10 @@ AUTH_TRANSACTION_KEY=REPLACE_WITH_BASE64_32_BYTE_KEY
 ```
 
 The deployment applies the `Credential` migration before replacing the API container.
-Native passwords must contain 12 to 128 characters. ArenaCore normalizes email
-addresses to lowercase and stores only salted scrypt password hashes.
+Native registration collects a unique public username, display name, email, and
+password directly on the ArenaCore sign-up page. Passwords must contain 12 to 128
+characters. ArenaCore normalizes usernames and email addresses to lowercase and
+stores only salted scrypt password hashes.
 
 ## Google button
 
@@ -64,6 +66,10 @@ reads the authenticated user's stable numeric GitHub ID, and discards the access
 `OIDC_ENABLED` and the `OIDC_*` settings remain supported. The old `/auth/login`
 route defaults to that connection for compatibility. The frontend's Google and GitHub
 buttons explicitly choose the direct providers and do not visit Auth0 Universal Login.
+The provider transaction also carries an encrypted, validated internal return path,
+so users return to the ArenaCore page that requested authentication. Provider denial
+returns to the ArenaCore sign-in form with a generic error and never exposes provider
+diagnostics.
 
 ## Activation and verification
 

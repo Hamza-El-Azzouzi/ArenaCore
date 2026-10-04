@@ -26,6 +26,7 @@ integration('OIDC protocol and session integration', () => {
   const rateKeys = new Set<string>();
   const origin = 'http://localhost:3000';
   const nativeEmail = 'native-auth-test@arenacore.invalid';
+  const usernameConflictEmail='native-username-conflict@arenacore.invalid';
   let sessionCookie: string;
   function request(path: string, options: RequestInit = {}) {
     return fetch(`${base}${path}`, {...options, redirect: 'manual'});
@@ -37,9 +38,9 @@ integration('OIDC protocol and session integration', () => {
     keys.forEach(k=>rateKeys.add(k));
     return keys;
   }
-  async function start(cookie?: string): Promise<Start> {
+  async function start(cookie?: string,returnTo?:string): Promise<Start> {
     currentRateKeys();
-    const response = await request('/auth/login', {headers: cookie ? {cookie} : {}});
+    const response = await request(`/auth/login${returnTo?`?${new URLSearchParams({returnTo})}`:''}`, {headers: cookie ? {cookie} : {}});
     expect(response.status).toBe(302);
     const authorization = new URL(response.headers.get('location')!);
     const state = authorization.searchParams.get('state')!;
@@ -71,7 +72,7 @@ integration('OIDC protocol and session integration', () => {
     await app?.close();
     if (db) {
       if (provider) {
-        const users = await db.user.findMany({where: {OR: [{issuer: provider.issuer, subject: provider.subject}, {issuer: 'arenacore:password', subject: nativeEmail}]}, select: {id: true}});
+        const users = await db.user.findMany({where: {OR: [{issuer: provider.issuer, subject: provider.subject}, {issuer: 'arenacore:password', subject:{in:[nativeEmail,usernameConflictEmail]}}]}, select: {id: true}});
         await db.auditEvent.deleteMany({where: {actorId: {in: users.map(u=>u.id)}}});
         await db.user.deleteMany({where: {id: {in: users.map(u=>u.id)}}});
       }
@@ -96,13 +97,16 @@ integration('OIDC protocol and session integration', () => {
   it('registers and signs in locally without exposing or storing a plaintext password', async () => {
     currentRateKeys();
     const password = 'correct horse battery staple';
-    expect((await request('/auth/register', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({displayName: 'Native User', email: nativeEmail.toUpperCase(), password})})).status).toBe(201);
-    const duplicate = await request('/auth/register', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({displayName: 'Duplicate', email: nativeEmail, password})});
+    expect((await request('/auth/register', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({username:'native_user',displayName: 'Native User', email: nativeEmail.toUpperCase(), password})})).status).toBe(201);
+    const duplicate = await request('/auth/register', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({username:'native_user_2',displayName: 'Duplicate', email: nativeEmail, password})});
     expect(duplicate.status).toBe(409);
+    const usernameConflict=await request('/auth/register',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({username:'native_user',displayName:'Other user',email:usernameConflictEmail,password})});
+    expect(usernameConflict.status).toBe(409);expect((await body<{error:{code:string}}>(usernameConflict)).error.code).toBe('USERNAME_TAKEN');
     const credential = await db.credential.findUniqueOrThrow({where: {email: nativeEmail}, include: {user: true}});
     expect(credential.passwordHash).toMatch(/^scrypt\$32768\$8\$1\$/);
     expect(credential.passwordHash).not.toContain(password);
     expect(credential.user.displayName).toBe('Native User');
+    expect(credential.user.username).toBe('native_user');
     const wrong = await request('/auth/password', {method: 'POST', headers: {'content-type': 'application/json', origin}, body: JSON.stringify({email: nativeEmail, password: 'this password is incorrect'})});
     expect(wrong.status).toBe(401);
     expect((await body<{error:{code:string}}>(wrong)).error.code).toBe('INVALID_CREDENTIALS');
@@ -144,6 +148,11 @@ integration('OIDC protocol and session integration', () => {
     expect(session.tokenHash).not.toBe(sessionCookie.split('=')[1]);
     expect(await db.auditEvent.count({where: {actorId: user.id, action: 'AUTH_LOGIN'}})).toBe(1);
   });
+  it('keeps a validated internal destination inside the encrypted provider transaction',async()=>{
+    const response=await callback(await start(undefined,'/competitions/mine'));
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe(`${origin}/competitions/mine`);
+  });
   it('rejects missing or wrong browser binding without consuming the legitimate attempt', async () => {
     const flow = await start(), code = provider.issueCode(flow.authorization);
     const path = `/auth/callback?${new URLSearchParams({state: flow.state, code})}`;
@@ -183,7 +192,7 @@ integration('OIDC protocol and session integration', () => {
     const flow = await start(), before = provider.tokenRequests;
     const path = `/auth/callback?${new URLSearchParams({state: flow.state, error: 'access_denied', error_description: 'PRIVATE_PROVIDER_DIAGNOSTIC'})}`;
     const response = await request(path, {headers: {cookie: flow.cookie}});
-    expect(response.status).toBe(401); expect(await response.text()).not.toContain('PRIVATE_PROVIDER_DIAGNOSTIC');
+    expect(response.status).toBe(302); expect(response.headers.get('location')).toBe(`${origin}/sign-in?authError=provider`); expect(await response.text()).not.toContain('PRIVATE_PROVIDER_DIAGNOSTIC');
     expect(provider.tokenRequests).toBe(before);
     expect((await request(path, {headers: {cookie: flow.cookie}})).status).toBe(403);
   });
