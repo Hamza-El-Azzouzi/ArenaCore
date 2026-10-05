@@ -8,6 +8,15 @@ import { DockerError } from './transport';
 import { SandboxCleanupError } from '@arenacore/contracts';
 import { METRIC_ERROR_CODES } from './metrics';
 
+function safeFailureCode(error:unknown){
+  if(error instanceof SandboxCleanupError)return 'SANDBOX_CLEANUP_UNCONFIRMED';
+  if(error instanceof DockerError)return error.code;
+  if(error instanceof Error&&METRIC_ERROR_CODES.has(error.message))return error.message;
+  if(error instanceof z.ZodError)return 'INVALID_EXECUTION_REQUEST';
+  if(error instanceof Error&&['RUNNER_NOT_READY','RUNNER_CAPACITY','DUPLICATE_ATTEMPT','SANDBOX_POLICY_MISMATCH','INVALID_CONTAINER_STATE'].includes(error.message))return error.message;
+  return 'UNCLASSIFIED_RUNNER_FAILURE';
+}
+
 export async function listenSupervisor(supervisor:Pick<SandboxSupervisor,'execute'|'stopAccepting'|'reapExpired'>,socketPath:string) {
   if(!socketPath.startsWith('/')||socketPath.includes('\0'))throw new Error('INVALID_SUPERVISOR_SOCKET');
   const parent=await stat(dirname(socketPath));
@@ -32,6 +41,8 @@ export async function listenSupervisor(supervisor:Pick<SandboxSupervisor,'execut
       controllers.set(key,abort);
       const result=await supervisor.execute(execution,abort.signal);reply(res,200,{...result,...(abort.signal.aborted?{cancellationConfirmed:true}:{})});
     } catch(e) {
+      const failure=safeFailureCode(e);
+      console.error(`RUNNER_EXECUTION_FAILED execution=${key?.split(':')[0]??'unparsed'} attempt=${key?.split(':')[1]??'unparsed'} code=${failure}`);
       if(e instanceof Error&&METRIC_ERROR_CODES.has(e.message))console.error(`RUNNER_METRICS_FAILED ${e.message}`);
       if(e instanceof DockerError && e.code==='ABORTED' && abort.signal.aborted)reply(res,200,{cases:[],cancellationConfirmed:true});
       else reply(res,503,{error:{code:e instanceof SandboxCleanupError?'SANDBOX_CLEANUP_UNCONFIRMED':'EXECUTION_UNAVAILABLE'}});

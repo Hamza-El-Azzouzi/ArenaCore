@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Queue, Worker } from 'bullmq';
 import { io, Socket } from 'socket.io-client';
 import { JudgingBackend, loadJudgePlan } from '../apps/runner/src/judging-backend';
+import {RunnerExecutionError} from '../apps/runner/src/client';
 import { SandboxCleanupError } from '@arenacore/contracts';
 import { Database } from '../apps/api/src/database/database';
 import { JobStore, REPLAY_ROWS, REPLAY_BYTES } from '../apps/api/src/executions/job-store';
@@ -96,6 +97,13 @@ suite('durable queue, leases, cancellation, public replay and socket authorizati
     const row=await fixture();let calls=0;worker({execute:async ctx=>{calls++;await ctx.markRunning();await ctx.console(caseId,'stdout','5\n');return {verdict:'ACCEPTED',runtimeMs:3,publicCaseResults:[{caseId,verdict:'ACCEPTED',stdout:'5\n'}]};}});
     await dispatcher.tick();await until(async()=> (await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='FINISHED');expect(calls).toBe(1);
     const replay=await jobs.replay(userId,row.id,1,0);expect(replay.replayAvailable).toBe(true);expect(replay.events.map(e=>e.kind)).toEqual(['execution_status','execution_status','console_output','final_verdict']);expect(replay.snapshot.publicCaseResults![0]!.stdout).toBe('5\n');
+  });
+  it('retries a confirmed-clean runner failure before returning an internal error',async()=>{
+    const row=await fixture();let calls=0;
+    worker({execute:async()=>{calls++;if(calls===1)throw new RunnerExecutionError('EXECUTION_UNAVAILABLE');return {verdict:'ACCEPTED',runtimeMs:2,memoryKiB:1024};}});
+    await dispatcher.tick();await until(()=>calls===1);await until(async()=>await db.outboxEvent.count({where:{executionId:row.id,kind:'EXECUTION_RECOVERY',publishedAt:null}})===1);await dispatcher.tick();
+    await until(async()=>(await db.execution.findUniqueOrThrow({where:{id:row.id}})).state==='FINISHED');
+    expect(await db.execution.findUniqueOrThrow({where:{id:row.id}})).toMatchObject({attempt:2,verdict:'ACCEPTED',runtimeMs:2,memoryKiB:1024});
   });
   it('judges a real queued Submit without publishing hidden diagnostics',async()=>{
     const row=await fixture('SUBMIT');

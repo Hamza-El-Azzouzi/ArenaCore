@@ -1,5 +1,7 @@
 # Dedicated runner host setup and isolation acceptance
 
+For incident diagnosis and safe recovery commands, see [Runner troubleshooting](../../docs/RUNNER_TROUBLESHOOTING.md).
+
 Stage 6 code is implemented as a supervisor library and preflight CLI. The dedicated ARM64 host passed the earlier 15-test live gVisor suite with the pinned three-language manifest. The suite now contains 19 tests after adding file-backed input delivery and cross-case file cleanup; those four checks require a fresh host run. The idle supervisor/janitor lifecycle, restricted worker dependency, controlled seven-job live judging, abrupt supervisor-death, and restricted-identity cgroup metric gates also passed. Independent review remains a launch gate. Do not enable public execution from this guide alone.
 
 ## Host boundary
