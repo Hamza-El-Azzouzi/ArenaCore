@@ -32,10 +32,10 @@ export class JobStore {
   }
   private deadline(row: Execution) { return row.queueExpiresAt.getTime() + 600000; }
   private async notifyExecution(tx:Prisma.TransactionClient,row:Execution,verdict:string){
-    if(row.mode!=='SUBMIT'||verdict==='CANCELLED')return;
-    const context=await tx.execution.findUnique({where:{id:row.id},select:{user:{select:{productNotifications:true}},problemVersion:{select:{title:true,problem:{select:{slug:true}}}}}});
-    if(!context?.user.productNotifications)return;
-    await tx.notification.createMany({data:[{userId:row.userId,kind:'EXECUTION_RESULT',title:'Submission judged',body:`${context.problemVersion.title}: ${verdict.replaceAll('_',' ').toLowerCase()}.`,href:`/problems/${context.problemVersion.problem.slug}?tab=submissions`,dedupeKey:`execution:${row.id}:result`}],skipDuplicates:true});
+    if(row.mode!=='SUBMIT'||verdict==='CANCELLED'||!row.leaseToken)return;
+    // The restricted runner can invoke only this fenced, SECURITY DEFINER
+    // projection. It never receives SELECT/INSERT access to users or notifications.
+    await tx.$executeRaw`SELECT public.create_execution_result_notification(${row.id}::uuid, ${row.attempt}::integer, ${row.leaseToken}::uuid, ${verdict}::text)`;
   }
   // Caller owns the parent row lock. Event and sequence updates share its transaction.
   async event(tx: Prisma.TransactionClient, row: Execution, fields: Omit<PublicExecutionEvent,'executionId'|'attempt'|'sequence'>) {
@@ -54,8 +54,8 @@ export class JobStore {
   }
   private async terminal(tx: Prisma.TransactionClient, row: Execution, state: 'INTERNAL_ERROR'|'CANCELLED', failureCode?: ExecutionFailureCode) {
     const seq = await this.event(tx, row, {kind:'final_verdict',state, verdict: state, ...(failureCode ? {failureCode}: {})});
-    await tx.execution.update({where:{id:row.id},data:{state,verdict:state,failureCode:failureCode ?? null,finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null,lastSequence:seq}});
     await this.notifyExecution(tx,row,state);
+    await tx.execution.update({where:{id:row.id},data:{state,verdict:state,failureCode:failureCode ?? null,finishedAt:new Date(),leaseToken:null,leaseExpiresAt:null,lastSequence:seq}});
   }
   async claim(id: string): Promise<{lease: Lease; execution: Execution}|null> {
     return this.db.$transaction(async tx => {
@@ -116,8 +116,8 @@ export class JobStore {
       }
       const seq=await this.event(tx,row,{kind:'final_verdict',state:'FINISHED',verdict:result.verdict});
       const results=result.publicCaseResults?.map(r=>({...r,...(r.stdout!==undefined?{stdout:safeConsole(r.stdout)}:{}),...(r.stderr!==undefined?{stderr:safeConsole(r.stderr)}:{})}));
-      await tx.execution.update({where:{id:row.id},data:{state:'FINISHED',verdict:result.verdict,finishedAt:new Date(),lastSequence:seq,leaseToken:null,leaseExpiresAt:null,runtimeMs:result.runtimeMs,memoryKiB:result.memoryKiB,...(results?{publicResults:results}:{})}});
       await this.notifyExecution(tx,row,result.verdict);
+      await tx.execution.update({where:{id:row.id},data:{state:'FINISHED',verdict:result.verdict,finishedAt:new Date(),lastSequence:seq,leaseToken:null,leaseExpiresAt:null,runtimeMs:result.runtimeMs,memoryKiB:result.memoryKiB,...(results?{publicResults:results}:{})}});
       return true;
     });
   }

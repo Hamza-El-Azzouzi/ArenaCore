@@ -113,6 +113,10 @@ After the host is bootstrapped and the environment secrets exist, every successf
 to `main` deploys the tested commit automatically. Pull requests, scheduled audits and
 manual verification runs never deploy.
 
+The runner deployment waits for the application deployment. This guarantees that
+database migrations and restricted worker function grants are installed before the
+runner dependency check activates the same release.
+
 Create a second protected environment named `production-runner` with corresponding
 `RUNNER_SSH_HOST`, `RUNNER_SSH_PORT`, `RUNNER_SSH_USER`, `RUNNER_SSH_PRIVATE_KEY`, and
 `RUNNER_SSH_HOST_KEY` secrets. Runner deployment is additionally disabled unless the

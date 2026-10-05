@@ -97,6 +97,18 @@ The worker queries the file relation while loading every judge plan, including
 STDIN plans with no file rows. If this grant is absent, executions fail before
 the supervisor receives a request.
 
+Submit settlement also requires execution on the fenced notification function,
+without granting the runner direct access to user or notification tables:
+
+```sql
+GRANT EXECUTE ON FUNCTION create_execution_result_notification(UUID, INTEGER, UUID, TEXT)
+TO arenacore_worker;
+```
+
+If Run succeeds while Submit repeatedly reaches `RUNNING` and then loses its
+lease, verify this function privilege. That pattern means judging completed but
+the atomic Submit settlement could not create its safe notification projection.
+
 On the application VM, inspect queue counts without reading payloads:
 
 ```bash
