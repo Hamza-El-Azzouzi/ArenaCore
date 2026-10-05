@@ -128,6 +128,17 @@ export class JobStore {
       await this.terminal(tx,row,row.cancellationRequestedAt && cleanupConfirmed?'CANCELLED':'INTERNAL_ERROR',row.cancellationRequestedAt?(cleanupConfirmed?undefined:'CANCELLATION_TIMEOUT'):'JOB_FAILURE');return true;
     });
   }
+  async recover(lease:Lease){
+    return this.db.$transaction(async tx=>{
+      const row=await this.locked(tx,lease.executionId);
+      if(!row||!this.valid(row,lease))return false;
+      if(row.cancellationRequestedAt){await this.terminal(tx,row,'CANCELLED');return true;}
+      if(row.attempt>=MAX_ATTEMPTS){await this.terminal(tx,row,'INTERNAL_ERROR','JOB_FAILURE');return true;}
+      await tx.execution.update({where:{id:row.id},data:{leaseExpiresAt:row.now}});
+      await tx.outboxEvent.upsert({where:{executionId_kind_generation:{executionId:row.id,kind:'EXECUTION_RECOVERY',generation:row.attempt}},create:{executionId:row.id,kind:'EXECUTION_RECOVERY',generation:row.attempt},update:{publishedAt:null,dispatchToken:null,dispatchExpiresAt:null,nextDispatchAt:row.now}});
+      return true;
+    });
+  }
   async cancel(userId: string, id: string, activeAllowed: boolean) {
     return this.db.$transaction(async tx => {
       const row=await this.locked(tx,id);

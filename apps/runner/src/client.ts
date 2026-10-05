@@ -4,6 +4,19 @@ import { SandboxCleanupError } from '@arenacore/contracts';
 import { CAPS, sandboxRequestSchema } from '@arenacore/runtime-policy';
 import { ExecutionObservation } from './supervisor';
 
+export type RunnerExecutionErrorCode='RUNNER_CAPACITY'|'DUPLICATE_ATTEMPT'|'EXECUTION_UNAVAILABLE';
+export class RunnerExecutionError extends Error {
+  readonly recoverable=true;
+  constructor(readonly code:RunnerExecutionErrorCode){super(code);this.name='RunnerExecutionError';}
+}
+const runnerError=(value:unknown):RunnerExecutionError|undefined=>{
+  if(typeof value!=='object'||value===null)return;
+  const error=(value as {error?:unknown}).error;
+  if(typeof error!=='object'||error===null)return;
+  const code=(error as {code?:unknown}).code;
+  return ['RUNNER_CAPACITY','DUPLICATE_ATTEMPT','EXECUTION_UNAVAILABLE'].includes(String(code))?new RunnerExecutionError(code as RunnerExecutionErrorCode):undefined;
+};
+
 export class SupervisorClient {
   constructor(private readonly socketPath:string){if(!socketPath.startsWith('/'))throw new Error('INVALID_SUPERVISOR_SOCKET');}
   execute(input:unknown,signal:AbortSignal):Promise<ExecutionObservation> {
@@ -15,7 +28,7 @@ export class SupervisorClient {
         const chunks:Buffer[]=[];let bytes=0;
         res.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>2*1024*1024){req.destroy();reject(new SandboxCleanupError());}else chunks.push(chunk);});
         res.once('error',()=>reject(new SandboxCleanupError()));
-        res.once('end',()=>{try{const data:unknown=JSON.parse(Buffer.concat(chunks).toString());if(res.statusCode!==200)throw new Error();resolve(observationSchema.parse(data));}catch{reject(new SandboxCleanupError());}});
+        res.once('end',()=>{try{const data:unknown=JSON.parse(Buffer.concat(chunks).toString());if(res.statusCode!==200){reject(runnerError(data)??new SandboxCleanupError());return;}resolve(observationSchema.parse(data));}catch{reject(new SandboxCleanupError());}});
       });
       // Losing RPC contact does not prove that the guest stopped. Conservative failure.
       const deadline=setTimeout(()=>req.destroy(),CAPS.totalMs+15000);deadline.unref();

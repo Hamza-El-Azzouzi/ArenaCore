@@ -47,6 +47,7 @@ export interface ExecutionBackend {
   // Normal settlement requires stopped processes; SandboxCleanupError explicitly reports uncertainty.
   execute(context: {execution:Execution;signal:AbortSignal;markRunning:()=>Promise<boolean>;console:(caseId:string,stream:'stdout'|'stderr',text:string)=>Promise<boolean>}):Promise<WorkerResult>;
 }
+const recoverableRunnerFailure=(error:unknown):error is Error&{recoverable:true;code:'RUNNER_CAPACITY'|'DUPLICATE_ATTEMPT'|'EXECUTION_UNAVAILABLE'}=>error instanceof Error&&(error as {recoverable?:unknown}).recoverable===true&&['RUNNER_CAPACITY','DUPLICATE_ATTEMPT','EXECUTION_UNAVAILABLE'].includes(String((error as {code?:unknown}).code));
 export function startExecutionWorker(jobs: JobStore, url: string, queueName: string, backend: ExecutionBackend) {
   const worker=new Worker(queueName,async job=>{
     const {executionId}=queuePayloadSchema.parse(job.data);
@@ -63,7 +64,12 @@ export function startExecutionWorker(jobs: JobStore, url: string, queueName: str
     try {
       const result=await backend.execute({execution,signal:abort.signal,markRunning:()=>jobs.markRunning(lease),console:(caseId,stream,text)=>jobs.console(lease,caseId,stream,text)});
       await jobs.finish(lease,result);
-    } catch(e) {await jobs.fail(lease, !(e instanceof SandboxCleanupError));} finally {clearInterval(timer);await pending;}
+    } catch(e) {
+      const recoverable=recoverableRunnerFailure(e);
+      const code=recoverable?e.code:e instanceof SandboxCleanupError?'SANDBOX_CLEANUP_UNCONFIRMED':'WORKER_BACKEND_FAILURE';
+      console.error(`JUDGING_JOB_FAILED execution=${execution.id} attempt=${lease.attempt} code=${code}`);
+      if(recoverable)await jobs.recover(lease);else await jobs.fail(lease, !(e instanceof SandboxCleanupError));
+    } finally {clearInterval(timer);await pending;}
   },{connection:redisOptions(url,true),concurrency:2,lockDuration:30000,maxStalledCount:1});
   // Never log Redis credentials, queue data, source, or backend exception text.
   worker.on('error',()=>{});
