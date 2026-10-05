@@ -42,8 +42,14 @@ GRANT CONNECT ON DATABASE arenacore TO arenacore_worker;
 GRANT USAGE ON SCHEMA public TO arenacore_worker;
 GRANT SELECT, UPDATE ON TABLE "Execution" TO arenacore_worker;
 GRANT SELECT, INSERT, DELETE ON TABLE "ExecutionEvent" TO arenacore_worker;
-GRANT SELECT ON TABLE "ProblemVersion", "TestCase" TO arenacore_worker;
+GRANT SELECT ON TABLE "ProblemVersion", "TestCase", "TestCaseFile" TO arenacore_worker;
 ```
+
+Every table read through a Prisma relation needs an explicit grant. Loading a
+judge plan includes `TestCase.files`, so the worker requires `SELECT` on
+`TestCaseFile` even for a STDIN problem whose file collection is empty. The
+dependency check verifies this grant and fails at `DATABASE_PRIVILEGES` when a
+new plan table has not been added to the restricted role.
 
 On the runner, create `/etc/arenacore/worker.env` as `root:root` mode `0600`. Percent-encode URL-reserved characters in passwords. Use only the private application address:
 

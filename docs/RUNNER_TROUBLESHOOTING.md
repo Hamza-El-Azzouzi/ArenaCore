@@ -69,6 +69,7 @@ Do not paste source, database or Redis URLs, environment files, or hidden test d
 | `INVALID_CGROUP_*` / `CGROUP_*` | Host metrics failed. Run the idle metrics acceptance gate. |
 | `COMMAND_TIMEOUT` | A bounded Docker operation timed out. Check Docker, runsc, and host pressure. |
 | `ISOLATION_UNAVAILABLE` | runsc, seccomp, limits, or cgroup v2 failed preflight. Repair before enabling work. |
+| `WORKER_BACKEND_FAILURE` | The worker failed before or after supervisor RPC. If the supervisor has no matching execution marker, verify judge-plan database grants, especially `SELECT` on `TestCaseFile`. |
 | `JOB_FAILURE` | All safe attempts failed, or the backend failed non-recoverably. Correlate both journals. |
 | `QUEUE_TIMEOUT` | No worker claimed work. Check worker, Redis, queue name, and the application dispatcher. |
 
@@ -85,6 +86,16 @@ sudo journalctl -u arenacore-worker-check.service -n 40 --no-pager
 ```
 
 `WORKER_DEPENDENCY_CHECK_PASSED` verifies configuration, PostgreSQL login and least-privilege grants, Redis, and the private supervisor socket. A TCP probe alone does not verify credentials.
+
+After adding file-input support, the restricted database role must include:
+
+```sql
+GRANT SELECT ON TABLE "TestCaseFile" TO arenacore_worker;
+```
+
+The worker queries the file relation while loading every judge plan, including
+STDIN plans with no file rows. If this grant is absent, executions fail before
+the supervisor receives a request.
 
 On the application VM, inspect queue counts without reading payloads:
 
