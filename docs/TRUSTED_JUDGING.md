@@ -42,8 +42,21 @@ GRANT CONNECT ON DATABASE arenacore TO arenacore_worker;
 GRANT USAGE ON SCHEMA public TO arenacore_worker;
 GRANT SELECT, UPDATE ON TABLE "Execution" TO arenacore_worker;
 GRANT SELECT, INSERT, DELETE ON TABLE "ExecutionEvent" TO arenacore_worker;
-GRANT SELECT ON TABLE "ProblemVersion", "TestCase" TO arenacore_worker;
+GRANT SELECT ON TABLE "ProblemVersion", "TestCase", "TestCaseFile" TO arenacore_worker;
+GRANT EXECUTE ON FUNCTION create_execution_result_notification(UUID, INTEGER, UUID, TEXT) TO arenacore_worker;
 ```
+
+Every table read through a Prisma relation needs an explicit grant. Loading a
+judge plan includes `TestCase.files`, so the worker requires `SELECT` on
+`TestCaseFile` even for a STDIN problem whose file collection is empty. The
+dependency check verifies this grant and fails at `DATABASE_PRIVILEGES` when a
+new plan table has not been added to the restricted role.
+
+Submission-result notifications use a narrow `SECURITY DEFINER` function. It
+accepts only an allowlisted verdict and inserts only when the execution UUID,
+attempt and live lease token match an authoritative active Submit. This keeps
+`User`, `Problem`, and `Notification` table privileges away from the runner
+while ensuring notification work participates in the verdict transaction.
 
 On the runner, create `/etc/arenacore/worker.env` as `root:root` mode `0600`. Percent-encode URL-reserved characters in passwords. Use only the private application address:
 

@@ -124,7 +124,9 @@ jobs:
 
   deploy-runner:
     name: Deploy isolated runner
-    needs: verify
+    # Runner releases may depend on database functions/grants installed by the
+    # application migration, so never activate the runner first.
+    needs: [verify, deploy-application]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production-runner

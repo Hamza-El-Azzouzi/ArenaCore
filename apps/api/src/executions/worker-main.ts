@@ -33,7 +33,7 @@ async function main(){
     const queue=new Queue(config.QUEUE_NAME,{connection:redisOptions(config.REDIS_URL)});queue.on('error',()=>{});
     try {
       startupStage='DATABASE_PRIVILEGES';
-      const [permissions]=await db.$queryRaw<Array<{ok:boolean}>>`SELECT has_schema_privilege(current_user, 'public', 'USAGE') AND has_table_privilege(current_user, 'public."Execution"', 'SELECT,UPDATE') AND has_table_privilege(current_user, 'public."ExecutionEvent"', 'SELECT,INSERT,DELETE') AND has_table_privilege(current_user, 'public."ProblemVersion"', 'SELECT') AND has_table_privilege(current_user, 'public."TestCase"', 'SELECT') AS ok`;
+      const [permissions]=await db.$queryRaw<Array<{ok:boolean}>>`SELECT has_schema_privilege(current_user, 'public', 'USAGE') AND has_table_privilege(current_user, 'public."Execution"', 'SELECT,UPDATE') AND has_table_privilege(current_user, 'public."ExecutionEvent"', 'SELECT,INSERT,DELETE') AND has_table_privilege(current_user, 'public."ProblemVersion"', 'SELECT') AND has_table_privilege(current_user, 'public."TestCase"', 'SELECT') AND has_table_privilege(current_user, 'public."TestCaseFile"', 'SELECT') AND has_function_privilege(current_user, 'public.create_execution_result_notification(uuid,integer,uuid,text)', 'EXECUTE') AS ok`;
       if(!permissions?.ok)throw new Error('WORKER_DATABASE_PRIVILEGES_REQUIRED');
       startupStage='REDIS_CONNECTION';await within(queue.waitUntilReady(),10000);
       startupStage='SUPERVISOR_CONNECTION';await checkSupervisor(config.RUNNER_SOCKET_PATH);
