@@ -42,6 +42,12 @@ GOOGLE_CLIENT_ID=REPLACE_WITH_GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET=REPLACE_WITH_GOOGLE_CLIENT_SECRET
 ```
 
+In Google Cloud, complete the OAuth consent-screen branding and either publish the
+application or add every person who will sign in as a test user. The redirect URI
+must match character-for-character, including `https`, hostname, path, and the
+absence of a trailing slash. Google documents these requirements in its
+[OpenID Connect guide](https://developers.google.com/identity/openid-connect/openid-connect).
+
 ## GitHub button
 
 In GitHub, open **Settings → Developer settings → OAuth Apps**, register an OAuth
@@ -85,3 +91,21 @@ in a private browser window:
 
 Google and GitHub still show their own account-selection or consent screen. That
 redirect is required for the provider to authenticate the user; Auth0 is not involved.
+
+## Provider troubleshooting
+
+The public, non-sensitive readiness endpoint shows what the deployed API has enabled:
+
+```sh
+curl -fsS https://api-arena.helazzou.codes/api/v1/auth/providers
+```
+
+For Google, it must return `"google":true`. If it does not, confirm that
+`GOOGLE_AUTH_ENABLED=true`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a stable
+`AUTH_TRANSACTION_KEY` are present in `/etc/arenacore/api.env`, then deploy the API
+again. Do not paste any of these values into the frontend, GitHub, or chat.
+
+If Google itself displays `redirect_uri_mismatch`, correct the redirect URI in Google
+Cloud rather than changing the application URL. If Google blocks a user before the
+callback, add that user to the OAuth consent-screen test-user list or publish the
+consent screen.

@@ -87,6 +87,7 @@ integration('OIDC protocol and session integration', () => {
     process.env.GITHUB_AUTH_ENABLED = 'false';
   });
   it('keeps identity disabled until configured and rejects external return targets', async () => {
+    expect(await body(await request('/auth/providers'))).toEqual({password: true, google: false, github: false});
     config.values.OIDC_ENABLED = 'false';
     expect((await request('/auth/login')).status).toBe(503);
     config.values.OIDC_ENABLED = 'true';

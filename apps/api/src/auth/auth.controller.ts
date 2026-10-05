@@ -18,6 +18,16 @@ const returnTo = z.string().max(500).refine(value => value.startsWith('/') && !v
 @Controller()
 export class AuthController {
   constructor(@Inject(Sessions) private readonly sessions: Sessions, @Inject(Database) private readonly db: Database, @Inject(Config) private readonly config: Config, @Inject(LoginService) private readonly loginService: LoginService, @Inject(PasswordAuthService) private readonly passwordAuth: PasswordAuthService) {}
+  @Get('auth/providers')
+  providers() {
+    // This exposes only the enabled choices, never client IDs, secrets, or
+    // provider account details. It lets the browser avoid dead provider links.
+    return {
+      password: this.config.passwordAuthEnabled,
+      google: this.config.values.GOOGLE_AUTH_ENABLED === 'true',
+      github: this.config.values.GITHUB_AUTH_ENABLED === 'true',
+    };
+  }
   @Get('auth/login')
   async login(@Req() req: Request, @Query() query: unknown, @Res() res: Response) {
     const {provider,returnTo:path} = validate(z.strictObject({provider: z.enum(['auth0', 'google', 'github']).default('auth0'),returnTo:returnTo.default('/problems')}), query);
